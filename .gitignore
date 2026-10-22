@@ -1,0 +1,19 @@
+# Entornos virtuales
+venv/
+env/
+.env
+
+# Archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs
+.vscode/
+.idea/
+
+# Modelos pesados (puedes descomentar esto si no quieres subir tus .pt a git)
+# models/*.pt
+
+# Logs y bases de datos locales
+*.log
