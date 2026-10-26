@@ -26,9 +26,18 @@ Todo el contenido de usuario (UI, mensajes, comentarios) va en **español**.
 
 ## Gotchas críticos
 
-- **Rutas relativas**: `main.py`, `src/` y el worker cargan todo
-  (`config/*.json`, `models/*.pt`, `config/settings.json`) desde la raíz.
-  Ejecutar siempre con cwd = raíz del proyecto.
+- **Rutas de config SIEMPRE de `src/paths.py`**: ninguna parte calcula
+  rutas relativas (`"config/rules.json"`, `"models/ppe_best.pt"`).
+  Importar de `src/paths.py` (PROJECT_ROOT / CONFIG_DIR / MODELS_DIR +
+  RULES_PATH, ZONES_PATH, CLASSES_PATH, SETTINGS_PATH), ancladas a
+  `__file__`, no al CWD. Ya lo usan: `detector`, `rule_engine`,
+  `zones`, `video_worker`, `main.py` (CLI), `rules_editor`,
+  `zone_editor`, `settings_view`, `events_view`. `main.py` además fija
+  cwd = raíz como red de seguridad. Síntoma de ruta relativa suelta:
+  fallback silencioso (JSON "no existe") → UI vacía y cambios no
+  reflejados según desde dónde se abra la app.
+- (histórico, antes de paths.py) Estas rutas eran relativas al CWD y
+  solo funcionaban ejecutando con cwd = raíz del proyecto.
 - **No existe la carpeta `models/`**: `PPEDetector` (`src/detector.py`) cae por
   defecto a `yolov8n.pt` de la raíz (COCO, sin clases EPP → las reglas nunca
   pasan). Un modelo PPE entrenado va en `models/ppe_best.pt` o

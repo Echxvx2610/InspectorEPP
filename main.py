@@ -1,9 +1,20 @@
 import sys
 import os
+
+# La raíz del proyecto: imprescindible ANTES de importar src.* y para
+# asegurar que `python main.py` funcione con cualquier CWD.
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+os.chdir(ROOT_DIR)
+
 os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
+
 import argparse
 import cv2
 import numpy as np
+
+from src import paths
 
 def run_gui():
     from PySide6.QtWidgets import QApplication
@@ -26,8 +37,8 @@ def run_cli(args):
 
     print(f"Iniciando Guardián de Seguridad (Modo CLI) - Zona: {args.zone}")
 
-    detector = PPEDetector(model_path="models/ppe_yolov8.pt")
-    rule_engine = RuleEngine(config_path="config/rules.json", zone=args.zone)
+    detector = PPEDetector(model_path=str(paths.MODELS_DIR / "ppe_yolov8.pt"))
+    rule_engine = RuleEngine(config_path=str(paths.RULES_PATH), zone=args.zone)
     alert_system = AlertSystem()
 
     cam_source = int(args.source) if args.source.isdigit() else args.source

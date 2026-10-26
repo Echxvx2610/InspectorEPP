@@ -1,21 +1,39 @@
 {
   "SOLDADURA": {
-    "requeridos": [],
+    "requeridos": [
+      "helmet",
+      "vest",
+      "glasses",
+      "gloves",
+      "boots"
+    ],
     "mensaje": "Se requiere careta de soldadura, chaleco y guantes.",
     "mensaje_error": "Se requiere careta de soldadura, chaleco y guantes."
   },
   "LABORATORIO": {
-    "requeridos": [],
+    "requeridos": [
+      "mask",
+      "glasses",
+      "gloves",
+      "boots"
+    ],
     "mensaje": "Se requiere mascarilla y lentes de seguridad.",
     "mensaje_error": "Se requiere mascarilla y lentes de seguridad."
   },
-  "GENERAL": {
-    "requeridos": [],
+  "ALMACEN": {
+    "requeridos": [
+      "helmet",
+      "boots"
+    ],
     "mensaje": "Se requiere casco de seguridad y chaleco reflectante.",
     "mensaje_error": "Se requiere casco de seguridad y chaleco reflectante."
   },
   "SMT": {
-    "requeridos": [],
+    "requeridos": [
+      "glasses",
+      "gloves",
+      "boots"
+    ],
     "mensaje": "Se requiere EPP para SMT.",
     "mensaje_error": "Se requiere EPP para SMT."
   }

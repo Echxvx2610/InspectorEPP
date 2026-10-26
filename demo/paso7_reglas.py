@@ -119,7 +119,7 @@ def evaluar(reglas, perfil, presentes, zona_nombre=None):
         }
     faltantes_es = [PPE_ES.get(m, m) for m in faltantes]
     return {
-        "is_safe": False, "missing": faltantes, "rule_code": "VIOLACION",
+        "is_safe": False, "missing": faltantes, "rule_code": "NO CUMPLE",
         "explanation": f"Falta {', '.join(faltantes_es)} en {lugar}."
     }
 
