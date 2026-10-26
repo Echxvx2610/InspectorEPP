@@ -15,9 +15,11 @@ camara -> dibujo -> deteccion -> tracking -> asociacion
 python demo/paso1_camara.py
 ```
 
-Nota: hay una copia de `yolov8n.pt` dentro de `demo/` para que los
-scripts la encuentren al correr desde cualquier carpeta; también
-funciona la de la raíz. Todas las demos salen con la tecla `s`.
+Nota: hay copias de `yolov8n.pt` / `yolov8s.pt` dentro de `demo/` para que
+los scripts funcionen desde cualquier carpeta; también sirven las de la
+raíz. Todas las demos de ventana salen con la tecla `s` (o cerrando la
+ventana). Los pasos que abren cámara caen a `demo/foto_base.jpg` si la
+cámara no está disponible.
 
 ## Progreso
 
@@ -26,14 +28,12 @@ funciona la de la raíz. Todas las demos salen con la tecla `s`.
 | 1 | `paso1_camara.py` | Cámara y frames (NumPy) | completado |
 | 2 | `paso2_dibujo.py` | Dibujo: cajas, texto, animación | completado |
 | 3 | `paso3_YOLO.py` | Detección con YOLO | completado |
-| 4 | `paso4_tracking.py` | Tracking con IDs (ByteTrack) | completado* |
-| 5 | (por crear) | Asociación persona <-> EPP | pendiente |
-| 6 | (por crear) | Zonas con polígonos | pendiente |
-| 7 | (por crear) | Mini motor de reglas | pendiente |
-| 8 | (por crear) | Modelo PPE real (Roboflow) | pendiente |
-| 9 | (por crear) | Integración: mini-Guardián | opcional |
-
-\* falta el mini-reto de la estela (ver Paso 4).
+| 4 | `paso4_tracking.py` | Tracking con IDs (ByteTrack) + estela | completado |
+| 5 | `paso5_asociacion.py` | Asociación persona <-> EPP | completado |
+| 6 | `paso6_zonas.py` | Zonas con polígonos | completado |
+| 7 | `paso7_reglas.py` | Mini motor de reglas (consola) | completado |
+| 8 | `paso8_modelo_ppe.py` | Contrato de clases + ruta a Roboflow | completado (entrenar en Colab queda como tarea) |
+| 9 | `paso9_mini_guardian.py` | Integración: mini-Guardián | completado |
 
 ---
 
@@ -94,18 +94,114 @@ funciona la de la raíz. Todas las demos salen con la tecla `s`.
   ByteTrack no usa GMC. GMC solo aporta con cámaras en movimiento;
   en el Guardián las cámaras son fijas, así que `bytetrack.yaml` es
   la elección correcta para el proyecto
-- **PENDIENTE — reto de la estela:**
+- **RETO DE LA ESTELA — hecho.** La memoria del camino vive en un dict:
 
   ```python
   historias = {}                       # {track_id: [(x, y), ...]}
-  # en el bucle, tras calcular pies:
+  # en el bucle, tras calcular los pies:
   historias.setdefault(track_id, []).append(pies)
   historias[track_id] = historias[track_id][-30:]  # max 30 puntos
-  # dibujar la estela con cv2.line entre puntos consecutivos
+  # dibujar cv2.line entre puntos consecutivos
+  # y borrar la estela de quien ya salió del cuadro
   ```
 
   Es la memoria por persona que después usa el módulo temporal
-  (`src/temporal.py`) para confirmar violaciones.
+  (`src/temporal.py`) para confirmar violaciones. Ojo: el ID del
+  tracker puede ser `None` algún frame — sin ID no hay estela.
+
+### Paso 5 — Asociación persona <-> EPP
+
+- El modelo COCO no conoce helmet/vest: en la demo el EPP es
+  **sintético** (cajas que coloca el mouse) y solo las PERSONAS las
+  detecta YOLO. Percepción y razonamiento siguen desacoplados
+- La asociación es geometría pura: el CENTRO del EPP debe caer dentro
+  del bbox de la persona (con margen horizontal) **y** en la franja
+  vertical de su clase (`REGION_MAPPING`, `rel_y` 0.0=cabeza .. 1.0=pies)
+- Si dos personas compiten por un EPP, gana la de **MENOR área**
+  (persona más al frente); es exactamente el criterio de
+  `src/association.py`
+- Trucos de la sesión:
+  - `cv2.imread` falla con rutas con acentos en Windows -> leer bytes
+    con `np.fromfile` + `cv2.imdecode`
+  - foto estática -> IDs "estables por definición" (orden izquierda a
+    derecha); el tracking de verdad se demuestra en el paso 4
+  - imprimir en consola SOLO cuando cambia el veredicto (firma de
+    texto distinta al anterior) para no spamear a 30 fps
+- Reto hecho: dos personas compiten por un EPP
+
+### Paso 6 — Zonas con polígonos
+
+- El punto que decide la zona es el de los PIES (el mismo del paso 4)
+- `cv2.pointPolygonTest(poly, pt, False) >= 0` = dentro (borde cuenta)
+- Los polígonos deben ser `np.array(..., dtype=np.int32)`: las
+  funciones de OpenCV piden NumPy, no listas de Python
+- Relleno tenue: dibujar en un `overlay = vis.copy()` y mezclar una
+  SOLA vez con `cv2.addWeighted` al final (así lo hace
+  `ZoneManager.draw_zones`)
+- FUERA de toda zona = regla **R5**: se ignora, nunca es infracción
+- Reto hecho: zonas que se tocan -> gana la PRIMERA del JSON (orden
+  importa)
+
+### Paso 7 — Mini motor de reglas (consola)
+
+- REGLA CENTRAL del módulo simbólico: las reglas son DATOS
+  (`rules.json`), no código. Agregar un perfil nuevo no toca lógica
+- La evaluación es una resta de conjuntos: `faltantes = requeridos -
+  presentes` (cuidado: listas que conservan el ORDEN del JSON para el
+  mensaje, sets solo para la pertenencia)
+- Cada veredicto trae SIEMPRE `{is_safe, missing, rule_code,
+  explanation}` — esa es la EXPLICABILIDAD que quiere la materia y
+  que audita el cliente
+- Códigos de regla: `R5` (fuera de zona), `R0` (perfil sin regla o
+  con `requeridos` vacío — ojo: un perfil sin requeridos es SIEMPRE
+  conforme; no es un error de código sino de datos), `OK`, `VIOLACION`
+- Los IDs de EPP se escriben en inglés (`helmet`...); la traducción a
+  español ocurre SOLO al mostrar (texto => `PPE_ES`); aceptar el
+  tecleo en ambos idiomas es fácil con un mapa de alias
+- Reto hecho: perfil agregado por consola ('a' del REPL) y usado a
+  continuación, sin reiniciar
+- OJO para el proyecto real: el `config/rules.json` llegó un día con
+  TODOS los `requeridos` en `[]` y el sistema dejaba de alarmar; el
+  chequeo permite notarlo rápido
+
+### Paso 8 — Modelo PPE real (Roboflow) + contrato de clases
+
+- Este paso es mitad script (lo local y verificable), mitad manual
+  (Roboflow/Colab — ver docstring del script y el README)
+- **El chequeo de clases (`--check`) es la lección clave:** los
+  nombres de clase han de cuadrar con la EXACTITUD EXACTA (un caracter
+  más, un plural, 'casco'/'helmet') en tres fuentes a la vez:
+  modelo (`model.names`), `classes.json` (UI), `rules.json` (perfiles)
+- Consecuencias del desajuste verificadas en la demo:
+  - la regla exige una clase que el modelo no detecta -> la regla
+    NUNCA se dispara (infracciones silenciosas)
+  - `classes.json` anuncia clases que el modelo no tiene -> la UI
+    muestra etiquetas muertas
+- Reto pendiente (para el usuario): entrenar en Colab con el dataset
+  PPE (Roboflow), registrar comparación base vs PPE en el mismo video
+  y copiar los pesos a `models/ppe_best.pt`
+- Nota licencia: YOLOv8 es AGPL-3.0 (revísala antes de vender)
+
+### Paso 9 — Mini-Guardián integrado
+
+- La integración es ELEGANTE si se respeta la capa:
+  percepción (YOLO + geometría inline) -> asociar (paso 5) -> zona
+  (paso 6) -> REGLAS (real: `src/rule_engine.py`) -> TEMPORAL (real:
+  `src/temporal.py`) -> alerta (real: `src/alert_system.py`)
+- Con COCO el EPP se "concede" por teclas 1-5 (sintético); al día de
+  que exista `models/ppe_best.pt`, el MISMO script detecta EPP real
+  sin tocar nada simbólico
+- **Filtro temporal — la lección del proyecto:** no basta con "falta
+  EPP este frame": cuentan los frames CONSECUTIVOS (y/o un tiempo de
+  gracia). Solo el evento CONFIRMADO debe dejarse en el log; si no,
+  cada oclusión de 2 frames es una alarma falsa
+- Log de eventos: UNA entrada por racha de violación (no por frame);
+  con timestamp, persona, zona, texto de regla y `rule_code`. Se
+  guarda en `demo/eventos_demo.log`
+- Truco aprendido: cada ráfaga de EPP concedido reinicia el filtro
+  temporal (`TemporalFilter` fresco): escenario nuevo, contador cero
+- Doble modo de zonas: cargadas de `config/zones.json` (de la app) o
+  dibujadas en vivo con `z` + clics + `ENTER`
 
 ---
 
@@ -118,93 +214,13 @@ funciona la de la raíz. Todas las demos salen con la tecla `s`.
 5. Variables sin usar (`cls = results[0].names`)
 6. `cv2.flip(frame, 1)` es más seguro que `frame[:, ::-1]` cuando el
    frame entra a YOLO (array contiguo)
-
----
-
-## Siguientes pasos (guía para continuar solo)
-
-### Paso 5 — Asociación persona <-> EPP (geometría)
-
-Objetivo: saber **de QUIÉN** es cada EPP. COCO no trae
-helmet/vest: trabajar con cajas sintéticas.
-
-- Lienzo con 1-2 "personas" (rectángulos fijos) y clic izquierdo
-  que coloca un EPP (teclas 1-5 eligen la clase)
-- Regla de asociación: el **centro** del EPP cae dentro de la caja
-  de la persona **Y** en su región anatómica vertical:
-  - tercio superior: helmet, mask, glasses, welding_mask
-  - zona media: vest, gloves
-  - tercio inferior: boots
-- Dibujar verde = asociado, rojo = huérfano; imprimir el resultado
-- Referencia: `src/association.py` (`REGION_MAPPING`,
-  `PPEAssociator.associate`)
-- Reto: con 2 personas que compiten por un EPP, ganará la de
-  **menor área** (mismo criterio que `association.py`)
-
-### Paso 6 — Zonas con polígonos
-
-Objetivo: en qué **ZONA** está cada persona (punto de los pies).
-
-- Cargar polígonos desde un JSON (puede ser `config/zones.json` o
-  un `demo/zones_demo.json` con 2-3 zonas de práctica)
-- Clic = punto de los pies; `cv2.pointPolygonTest(poly, pt, False)
-  >= 0` significa dentro
-- Dibujar zonas con relleno tenue: `cv2.addWeighted` sobre un
-  overlay (así lo hace `ZoneManager.draw_zones`)
-- Fuera de toda zona = regla **R5**: ignorar
-- Referencia: `src/zones.py` (`ZoneManager`)
-- Reto: dos zonas que se tocan — ¿cuál gana? (la primera del JSON)
-
-### Paso 7 — Mini motor de reglas (módulo simbólico)
-
-Objetivo: decidir si una persona cumple la normativa de su zona.
-
-- Reglas en JSON: `{perfil: {requeridos: [...], mensaje}}`
-- Faltantes = requeridos - presentes (operaciones de `set`)
-- Conservar SIEMPRE la explicación: qué regla, qué hechos
-  (explicabilidad = clave del sistema y de la materia)
-- REPL en consola: elegir zona + escribir EPP presentes ->
-  imprimir `is_safe`, `missing`, código de regla y explicación
-- Referencia: `src/rule_engine.py` (`RuleEngine.evaluate_person`)
-- Reto: agregar una regla "BODEGA" al JSON **sin tocar código**
-  (esa es la gracia del módulo simbólico)
-
-### Paso 8 — Modelo PPE real (Roboflow)
-
-Objetivo: pasar de COCO genérico a `helmet`, `vest`,
-`welding_mask`...
-
-- Descargar dataset PPE de Roboflow Universe (revisar licencia)
-- `data.yaml` con las **mismas** clases que `rules.json` y
-  `classes.json` (evita desajustes de nombres)
-- Fine-tuning partiendo de pesos preentrenados (ideal en Colab):
-
-  ```python
-  from ultralytics import YOLO
-
-  model = YOLO("yolov8s.pt")
-  model.train(data="training/data.yaml", epochs=100, imgsz=640)
-  ```
-
-- Guardar pesos en `models/ppe_best.pt`: el detector del proyecto
-  (`src/detector.py`) ya los busca primero automáticamente
-- Reto: comparar detecciones del paso 3 (COCO) vs modelo PPE en el
-  mismo video
-- Nota de licencia: YOLOv8 es **AGPL-3.0**; para uso comercial
-  revisar la sección de licencias del `README.md`
-
-### Paso 9 (opcional) — Mini-Guardián integrado
-
-Unir todo en un solo archivo:
-
-```
-camara -> detect+track -> asociar EPP -> zona (pies)
-       -> reglas -> overlay + filtro temporal + log de eventos
-```
-
-- Filtro temporal: la alarma solo se confirma tras N frames
-  consecutivos (referencia `src/temporal.py`)
-- Log de eventos con timestamp cuando la alarma se confirma
+7. `cv2.imread` falla con rutas con acentos/raros en Windows ->
+   bytes + `cv2.imdecode`
+8. Cámara que no abre: en Windows DSHOW es lo primero, y a veces ni
+   el default funciona: paciencia con reintentos o foto estática
+9. Imprimir a 30 fps: imprime SOLO cuando cambia el veredicto (firma)
+10. f-strings de varias líneas dentro de `{}`: en Python 3.11 no
+    compilan -> variables limpias antes de formatear
 
 ---
 
@@ -220,6 +236,4 @@ Cada paso es una versión educativa de un módulo real del proyecto:
 | 6 | `src/zones.py` (`ZoneManager`) |
 | 7 | `src/rule_engine.py` (`RuleEngine`) |
 | 8 | `training/` + `README.md` (dataset y licencias) |
-| 9 | `src/ui/monitor.py` (pipeline completo) |
-
-Ante cualquier duda, comparar tu solución con el módulo real.
+| 9 | `src/ui/monitor.py` + `src/ui/video_worker.py` (pipeline real) |
