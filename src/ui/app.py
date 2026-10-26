@@ -1,139 +1,121 @@
 """
-Ventana Principal — Guardián EPP.
-Sidebar minimalista con iconos SVG + QStackedWidget.
+Ventana Principal — Guardián EPP (PyQt-Fluent-Widgets).
+FluentWindow con NavigationInterface reemplaza al sidebar QSS + QStackedWidget.
+
+Incluye captura global de excepciones: si algo revienta en el arranque,
+se escribe el traceback a guardian_error.log (y se muestra un diálogo)
+en lugar de que la consola se cierre sin mostrar nada.
 """
 
-from asyncio import subprocess
 import sys
-import numpy as np
-from PySide6.QtCore import Qt, Slot, QSize
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QLabel, QPushButton, QStackedWidget, QFrame
+import os
+from pathlib import Path
+import traceback
+
+# Asegurar que la raíz del proyecto esté en sys.path para ejecuciones directas
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
+
+from qfluentwidgets import (
+    FluentWindow, NavigationItemPosition, FluentIcon as FIF,
+    setTheme, Theme, Dialog
 )
 
-from src.ui.styles import MAIN_STYLESHEET
-from src.ui.icons import (
-    icon_shield, icon_monitor, icon_map,
-    icon_clipboard, icon_history, icon_settings
-)
-from src.ui.ui_helpers import nav_icon, tint_icon, set_role
-from src.ui.video_worker import VideoWorker
-from src.ui.monitor import MonitorView
-from src.ui.zone_editor import ZoneEditorView
-from src.ui.rules_editor import RulesEditorView
-from src.ui.events_view import EventsView
-from src.ui.settings_view import SettingsView
+
+def _excepthook(exc_type, exc_value, exc_tb):
+    """Escribe cualquier excepción no capturada a guardian_error.log."""
+    msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    print(msg, file=sys.stderr, flush=True)  # a consola por si se ejecuta desde terminal
+    try:
+        log_path = PROJECT_ROOT / "guardian_error.log"
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(msg + "\n" + "-" * 60 + "\n")
+    except Exception:
+        pass
+    try:
+        dlg = Dialog("Error inesperado", msg[-800:], None)
+        dlg.cancelButton.hide()
+        dlg.buttonLayout.insertStretch(0)
+        dlg.exec()
+    except Exception:
+        pass
 
 
-class MainWindow(QMainWindow):
+sys.excepthook = _excepthook
+
+
+class MainWindow(FluentWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Guardián EPP — Seguridad Industrial")
         self.resize(1280, 780)
         self.setMinimumSize(1080, 680)
-        self.setStyleSheet(MAIN_STYLESHEET)
+
+        # Tema claro Fluent (coherente con el diseño actual)
+        setTheme(Theme.LIGHT)
 
         self._last_frame = None
-        self._init_ui()
 
-        self.video_worker = VideoWorker(
-            source=0, parent=self
+        # ── Vistas (cada una es ScrollArea con objectName único) ──
+        from src.ui.monitor import MonitorView
+        from src.ui.zone_editor import ZoneEditorView
+        from src.ui.rules_editor import RulesEditorView
+        from src.ui.events_view import EventsView
+        from src.ui.settings_view import SettingsView
+
+        self.view_monitor = MonitorView(self)
+        self.view_zones = ZoneEditorView(self)
+        self.view_rules = RulesEditorView(self)
+        self.view_events = EventsView(self)
+        self.view_settings = SettingsView(self)
+
+        # ── Navegación (reemplaza el sidebar manual) ──
+        # NOTA: FluentWindow registra cada interfaz automáticamente;
+        # NO llamar a initNavigation() (no existe en FluentWindow).
+        self.addSubInterface(self.view_monitor, FIF.VIDEO, "Monitoreo")
+        self.addSubInterface(self.view_zones, FIF.PIN, "Zonas")
+        self.addSubInterface(self.view_rules, FIF.DOCUMENT, "Reglas")
+        self.addSubInterface(self.view_events, FIF.HISTORY, "Historial")
+        self.addSubInterface(self.view_settings, FIF.SETTING, "Ajustes")
+
+        # Ítem informativo fijo abajo (equivale al "v1.0 MVP")
+        self.navigationInterface.addItem(
+            routeKey="version",
+            icon=FIF.INFO,
+            text="v1.0 MVP",
+            selectable=False,
+            onClick=lambda: None,
+            position=NavigationItemPosition.BOTTOM,
+            tooltip="Guardián EPP v1.0",
         )
-        self.video_worker.frame_ready.connect(self._on_frame_received)
-        self.video_worker.start()
 
-    def _init_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        root = QHBoxLayout(central)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        # ── Sidebar ──
-        sidebar = QFrame()
-        sidebar.setObjectName("Sidebar")
-        sb = QVBoxLayout(sidebar)
-        sb.setContentsMargins(8, 14, 8, 14)
-        sb.setSpacing(4)
-
-        brand = QHBoxLayout()
-        brand.setContentsMargins(6, 0, 0, 10)
-        logo = QLabel()
-        logo.setPixmap(tint_icon(icon_shield(), "#0078d4", 22).pixmap(22, 22))
-        name = QLabel("Guardián EPP")
-        set_role(name, "brand")
-        brand.addWidget(logo)
-        brand.addWidget(name)
-        brand.addStretch()
-        sb.addLayout(brand)
-
-        self.nav_buttons = []
-        self.btn_monitor = self._nav("Monitoreo", icon_monitor(), 0)
-        self.btn_zones = self._nav("Zonas", icon_map(), 1)
-        self.btn_rules = self._nav("Reglas", icon_clipboard(), 2)
-        self.btn_events = self._nav("Historial", icon_history(), 3)
-        self.btn_settings = self._nav("Ajustes", icon_settings(), 4)
-
-        for b in self.nav_buttons:
-            sb.addWidget(b)
-
-        sb.addStretch()
-
-        ver = QLabel("v1.0  MVP")
-        set_role(ver, "caption")
-        sb.addWidget(ver)
-
-        root.addWidget(sidebar)
-
-        # ── Stack ──
-        self.stack = QStackedWidget()
-        self.view_monitor = MonitorView()
-        self.view_zones = ZoneEditorView()
-        self.view_rules = RulesEditorView()
-        self.view_events = EventsView()
-        self.view_settings = SettingsView()
-
-        self.stack.addWidget(self.view_monitor)
-        self.stack.addWidget(self.view_zones)
-        self.stack.addWidget(self.view_rules)
-        self.stack.addWidget(self.view_events)
-        self.stack.addWidget(self.view_settings)
-
-        root.addWidget(self.stack, stretch=1)
-
+        # ── Señales entre vistas ──
         self.view_monitor.camera_changed.connect(self._on_camera_changed)
         self.view_zones.zones_updated.connect(self._on_zones_updated)
+        self.view_zones.camera_selected.connect(self._on_zones_camera_selected)
         self.view_rules.rules_updated.connect(self._on_rules_updated)
         self.view_settings.settings_changed.connect(self._on_settings_changed)
 
-        self._switch(0)
+        # ── Worker de video ──
+        from src.ui.video_worker import VideoWorker
+        self.video_worker = VideoWorker(source=0, parent=self)
+        self.video_worker.frame_ready.connect(self._on_frame_received)
+        self.video_worker.start()
 
-    def _nav(self, text, icon, idx):
-        btn = QPushButton(text)
-        btn.setIcon(nav_icon(icon))
-        btn.setIconSize(QSize(18, 18))
-        btn.setProperty("class", "nav-btn")
-        btn.setCheckable(True)
-        btn.clicked.connect(lambda: self._switch(idx))
-        self.nav_buttons.append(btn)
-        return btn
-
-    def _switch(self, idx):
-        self.stack.setCurrentIndex(idx)
-        for i, b in enumerate(self.nav_buttons):
-            b.setChecked(i == idx)
-            b.setProperty("active", "true" if i == idx else "false")
-            b.style().unpolish(b)
-            b.style().polish(b)
-        if idx == 1 and self._last_frame is not None:
-            self.view_zones.set_sample_frame(self._last_frame)
-
-    @Slot(object, dict)
     def _on_frame_received(self, frame, meta):
-        self._last_frame = frame
-        if self.stack.currentIndex() == 0:
+        if frame is not None:
+            self._last_frame = frame
+            self.view_monitor.update_frame(frame, meta)
+            # Alimentar el lienzo del editor de zonas con el frame SIN
+            # anotaciones (para trazarse encima); la vista se auto-limita
+            # a ~5 Hz y solo repinta cuando su pestaña está activa.
+            if self.view_zones.isVisible():
+                self.view_zones.set_sample_frame(meta.get("raw", frame))
+        else:
             self.view_monitor.update_frame(frame, meta)
         for ev in meta.get("events", []):
             self.view_events.add_event(
@@ -144,6 +126,16 @@ class MainWindow(QMainWindow):
     def _on_camera_changed(self, source, _is_sim=False):
         self.video_worker.set_source(source)
 
+    def _on_zones_camera_selected(self, cam_key):
+        """El editor de zonas pidió otra cámara: apuntar el worker a esa
+        fuente y sincronizar el combo de Monitoreo en silencio."""
+        try:
+            source = int(str(cam_key).split("_")[-1])
+        except ValueError:
+            return
+        self.video_worker.set_source(source)
+        self.view_monitor.set_source_index(source)
+
     def _on_settings_changed(self, settings):
         if hasattr(self, "video_worker"):
             self.video_worker.apply_settings(settings)
@@ -152,6 +144,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "video_worker"):
             self.video_worker.reload_zones()
         self.view_events.refresh_zones()
+        if self._last_frame is not None:
+            self.view_zones.set_sample_frame(self._last_frame)
 
     def _on_rules_updated(self):
         if hasattr(self, "video_worker"):
@@ -162,3 +156,14 @@ class MainWindow(QMainWindow):
         if hasattr(self, "video_worker") and self.video_worker.isRunning():
             self.video_worker.stop()
         event.accept()
+
+
+def main():
+    app = QApplication(sys.argv)
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

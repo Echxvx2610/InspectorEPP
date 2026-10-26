@@ -1,0 +1,9 @@
+{
+  "default_camera": "0",
+  "confidence_threshold": 0.5,
+  "grace_period_frames": 9,
+  "tts_enabled": true,
+  "tts_cooldown_seconds": 4,
+  "arduino_relay_enabled": false,
+  "arduino_port": "COM3"
+}

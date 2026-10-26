@@ -1,5 +1,11 @@
 """
 Worker de Video para captura asíncrona y procesamiento neuro-simbólico.
+Sin cambios funcionales: QThread es independiente del framework de UI,
+por lo que funciona igual con qfluentwidgets. Ajustes menores:
+  - Emisiones protegidas (try/except) para evitar crashes si la vista
+    ya fue destruida durante el cierre de la app.
+  - stop() con quit()+wait() para cerrar limpio desde FluentWindow.
+
 Pipeline:
   1. Captura de frame (Cámara / Video / RTSP)
   2. Módulo Geométrico: Dibujar zonas de seguridad delimitadas
@@ -97,7 +103,17 @@ class VideoWorker(QThread):
         with QMutexLocker(self._mutex):
             self._running = False
         self.quit()
-        self.wait(2000)
+        # La apertura de cámara con CAP_DSHOW bloquea ~2-6 s sin poder
+        # cancelarse; un wait() corto destruiría el QThread mientras
+        # sigue vivo y aborta el proceso. Esperar hasta que termine.
+        self.wait(10000)
+
+    def _emit_frame(self, frame, metadata):
+        """Emite de forma segura: si la vista UI ya no existe, no crashea."""
+        try:
+            self.frame_ready.emit(frame, metadata)
+        except RuntimeError:
+            self._running = False
 
     def _open_capture(self, src):
         """Intenta abrir la fuente de video con backend adecuado."""
@@ -107,8 +123,7 @@ class VideoWorker(QThread):
             if not cap.isOpened():
                 cap = cv2.VideoCapture(idx)
             return cap
-        else:
-            return cv2.VideoCapture(str(src))
+        return cv2.VideoCapture(str(src))
 
     def run(self):
         self._running = True
@@ -146,7 +161,7 @@ class VideoWorker(QThread):
                         "events": []
                     }
                     self.fps_updated.emit(0.0)
-                    self.frame_ready.emit(None, metadata)
+                    self._emit_frame(None, metadata)
                     if self.cap is not None:
                         self.cap.release()
                         self.cap = None
@@ -176,7 +191,7 @@ class VideoWorker(QThread):
                         "events": []
                     }
                     self.fps_updated.emit(0.0)
-                    self.frame_ready.emit(None, metadata)
+                    self._emit_frame(None, metadata)
                     self.msleep(500)
                     continue
 
@@ -188,7 +203,9 @@ class VideoWorker(QThread):
                 conf = self.conf_threshold
 
             # A. Dibujar zonas de seguridad delimitadas sobre el frame
-            annotated_frame = self.zone_manager.draw_zones(annotated_frame, camera_key=cam_key)
+            annotated_frame = self.zone_manager.draw_zones(
+                annotated_frame, camera_key=cam_key
+            )
 
             # B. Inferencia conexionista + tracking de personas y EPP
             persons, ppe_items, _ = self.detector.detect_and_track(frame, conf=conf)
@@ -211,46 +228,46 @@ class VideoWorker(QThread):
                 # Punto de evaluación geométrica: centro inferior de los pies
                 feet_point = (int((px1 + px2) / 2), int(py2))
 
-                # Evaluar en qué zona delimitada se encuentra la persona
-                zone = self.zone_manager.find_zone_for_point(feet_point, camera_key=cam_key)
+                zone = self.zone_manager.find_zone_for_point(
+                    feet_point, camera_key=cam_key
+                )
                 zone_profile = zone.get("perfil") if zone else None
                 zone_name = zone.get("nombre") if zone else "Fuera de zona"
 
                 if zone_profile:
                     active_zones_found.add(zone_name)
 
-                # Implementos asociados a esta persona
                 assoc_data = associations.get(pid, {"present_ppe": [], "items": []})
                 present_ppe = assoc_data["present_ppe"]
 
-                # Motor de reglas simbólico
-                eval_res = self.rule_engine.evaluate_person(present_ppe, zone_profile, zone_name)
+                eval_res = self.rule_engine.evaluate_person(
+                    present_ppe, zone_profile, zone_name
+                )
                 is_violating = not eval_res["is_safe"]
 
-                # Filtro temporal anti-falsos positivos / anti-parpadeo
                 is_confirmed_alarm = self.temporal.update(pid, is_violating)
 
                 # Anotación visual de la persona en el frame
                 if not zone_profile:
-                    # Persona fuera de toda zona delimitada (R5: ignorar / gris)
                     color = (160, 160, 160)
                     status_text = "FUERA DE ZONA"
                     tag_bg = (60, 60, 60)
                 elif eval_res["is_safe"]:
-                    # Conforme a la normativa de la zona
-                    color = (50, 205, 50) # Verde BGR
+                    color = (50, 205, 50)
                     status_text = "CONFORME"
                     tag_bg = (30, 140, 30)
                 else:
-                    # Infracción en zona
-                    color = (40, 40, 230) # Rojo BGR
+                    color = (40, 40, 230)
                     status_text = f"FALTA EPP ({', '.join(eval_res['missing'])})"
                     tag_bg = (30, 30, 180)
 
                     if is_confirmed_alarm:
                         global_safe = False
                         relay_blocked = True
-                        alert_msg = f"Persona #{pid} en {zone_name} ({zone_profile}): {eval_res['explanation']}"
+                        alert_msg = (
+                            f"Persona #{pid} en {zone_name} "
+                            f"({zone_profile}): {eval_res['explanation']}"
+                        )
                         alerts.append(alert_msg)
                         events.append({
                             "ts": time.strftime("%H:%M:%S"),
@@ -261,21 +278,28 @@ class VideoWorker(QThread):
                             "rule": zone_profile or "--",
                             "relay": "Bloqueado",
                         })
-                        self.alert_system.trigger_alert(f"Infracción en {zone_name}: {eval_res['explanation']}")
+                        self.alert_system.trigger_alert(
+                            f"Infracción en {zone_name}: {eval_res['explanation']}"
+                        )
 
-                # Dibujar bounding box de la persona
-                cv2.rectangle(annotated_frame, (px1, py1), (px2, py2), color, 2, cv2.LINE_AA)
+                cv2.rectangle(
+                    annotated_frame, (px1, py1), (px2, py2), color, 2, cv2.LINE_AA
+                )
 
-                # Etiqueta de identificación
                 badge_text = f"#{pid} {status_text}"
-                (tw, th), _ = cv2.getTextSize(badge_text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-                cv2.rectangle(annotated_frame, (px1, max(0, py1 - th - 8)), (px1 + tw + 8, py1), tag_bg, -1)
+                (tw, th), _ = cv2.getTextSize(
+                    badge_text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1
+                )
+                cv2.rectangle(
+                    annotated_frame,
+                    (px1, max(0, py1 - th - 8)), (px1 + tw + 8, py1),
+                    tag_bg, -1
+                )
                 cv2.putText(
                     annotated_frame, badge_text, (px1 + 4, max(12, py1 - 4)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA
                 )
 
-                # Marcador de evaluación en los pies
                 cv2.circle(annotated_frame, feet_point, 4, color, -1)
 
                 persons_meta.append({
@@ -289,7 +313,6 @@ class VideoWorker(QThread):
                     "rule": eval_res["explanation"]
                 })
 
-            # Limpiar tracks que ya salieron de cuadro en el filtro temporal
             self.temporal.cleanup_old_tracks([p["id"] for p in persons])
 
             # Cálculo de FPS real
@@ -301,7 +324,6 @@ class VideoWorker(QThread):
                 fps_start = now
                 self.fps_updated.emit(current_fps)
 
-            # Metadata consolidada para la UI
             zone_display = ", ".join(active_zones_found) if active_zones_found else "GENERAL"
             metadata = {
                 "timestamp": time.strftime("%H:%M:%S"),
@@ -313,11 +335,15 @@ class VideoWorker(QThread):
                 "fps": current_fps,
                 "relay_blocked": relay_blocked,
                 "alerts": alerts,
-                "events": events
+                "events": events,
+                # Frame BGR original (sin zonas/cajas dibujadas), para el
+                # editor de zonas: los polígonos deben marcarse sobre
+                # la imagen limpia de la cámara.
+                "raw": frame
             }
 
             if self._running:
-                self.frame_ready.emit(annotated_frame, metadata)
+                self._emit_frame(annotated_frame, metadata)
 
             self.msleep(10)
 

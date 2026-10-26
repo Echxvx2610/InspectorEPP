@@ -1,0 +1,11 @@
+{
+  "ALMACEN": {
+    "requeridos": [
+      "helmet",
+      "vest",
+      "boots"
+    ],
+    "mensaje": "Se requiere EPP para ALMACEN.",
+    "mensaje_error": "Se requiere EPP para ALMACEN."
+  }
+}

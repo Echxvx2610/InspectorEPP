@@ -24,7 +24,7 @@ def run_cli(args):
     from src.rule_engine import RuleEngine
     from src.alert_system import AlertSystem
 
-    print(f"🛡️ Iniciando Guardián de Seguridad (Modo CLI) - Zona: {args.zone}")
+    print(f"Iniciando Guardián de Seguridad (Modo CLI) - Zona: {args.zone}")
 
     detector = PPEDetector(model_path="models/ppe_yolov8.pt")
     rule_engine = RuleEngine(config_path="config/rules.json", zone=args.zone)

@@ -1,10 +1,10 @@
-# Guardián de Seguridad y EPP 🛡️🥽
+# Guardián de Seguridad y EPP
 
 *Sistema neuro-simbólico para verificar en tiempo real que el personal cumple con su Equipo de Protección Personal (EPP) dentro de zonas de riesgo delimitadas.*
 
 ---
 
-## 📌 Descripción
+## Descripción
 
 Guardián EPP analiza el video de una o varias cámaras, detecta personas y su EPP, determina **en qué zona** se encuentra cada persona y evalúa si cumple la **normativa de esa zona**. Si no cumple, genera alertas (pantalla, voz, relé/Arduino, mensajería) y deja un registro auditable con evidencia.
 
@@ -14,7 +14,7 @@ Proyecto académico (Inteligencia Artificial) con diseño orientado a convertirs
 
 ---
 
-## 🧠 Arquitectura neuro-simbólica
+## Arquitectura neuro-simbólica
 
 ```text
 Cámara ─▶ [1] Detector + Tracker ─▶ [2] Asociación persona↔EPP ─▶ [3] Ubicación en zona
@@ -51,7 +51,7 @@ Una violación solo se confirma tras **N frames consecutivos** (o X segundos). E
 
 ---
 
-## 🖥️ Interfaz
+## Interfaz
 
 ### Pantallas
 1. **Monitoreo (principal):** video con zonas dibujadas, cajas coloreadas, semáforo de estado, checklist por zona, registro de eventos.
@@ -64,11 +64,11 @@ Una violación solo se confirma tras **N frames consecutivos** (o X segundos). E
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│ 🛡️ Guardián EPP     Cámara: [Taller 1 ▼]   🟢 OK   ⚙ Config │
+│    Guardián EPP     Cámara: [Taller 1 ▼]   🟢 OK   ⚙ Config │
 ├────────────────────────────────────┬─────────────────────────┤
 │                                    │  ZONA: SOLDADURA        │
 │   VIDEO EN VIVO                    │  ┌───────────────────┐  │
-│   - polígonos de zona              │  │  ❌ INCUMPLIMIENTO │  │
+│   - polígonos de zona              │  │   INCUMPLIMIENTO │  │
 │   - cajas verde/rojo por persona   │  └───────────────────┘  │
 │   - ID de persona                  │  Persona #3             │
 │                                    │  ✅ Careta  ❌ Chaleco  │
@@ -85,7 +85,7 @@ Una violación solo se confirma tras **N frames consecutivos** (o X segundos). E
 
 ---
 
-## 📁 Estructura del proyecto
+## Estructura del proyecto
 
 ```text
 guardian-epp/
@@ -161,7 +161,7 @@ guardian-epp/
 
 ---
 
-## 📦 Dataset: de dónde obtenerlo
+## Dataset: de dónde obtenerlo
 
 | Fuente | Qué ofrece | Notas |
 |---|---|---|
@@ -174,7 +174,7 @@ guardian-epp/
 
 ---
 
-## 🏋️ Entrenamiento con imágenes propias
+## Entrenamiento con imágenes propias
 
 ### Flujo recomendado
 1. **Capturar:** graba video de las cámaras reales del cliente (distintos turnos, iluminación, ángulos, personas, EPP de distintos colores y marcas).
@@ -204,7 +204,7 @@ model.train(data="training/data.yaml", epochs=100, imgsz=640, batch=16)
 
 ---
 
-## ⚖️ Licencias (crítico si lo vas a vender)
+## Licencias (crítico si lo vas a vender)
 
 - **Ultralytics YOLOv8** usa licencia **AGPL-3.0**: si distribuyes un producto comercial que lo usa, debes liberar tu código o comprar una **licencia empresarial** de Ultralytics.
 - **Alternativas con licencia permisiva** (Apache 2.0/MIT): YOLOX, RT-DETR, y otros detectores abiertos. Verifica siempre la licencia vigente antes de decidir.
@@ -212,7 +212,7 @@ model.train(data="training/data.yaml", epochs=100, imgsz=640, batch=16)
 
 ---
 
-## 🗺️ Plan de acción por fases
+## Plan de acción por fases
 
 | Fase | Objetivo | Entregable |
 |---|---|---|
@@ -229,7 +229,7 @@ model.train(data="training/data.yaml", epochs=100, imgsz=640, batch=16)
 
 ---
 
-## 💼 Ideas para comercializarlo
+## Ideas para comercializarlo
 
 - **Modelo de negocio:** suscripción mensual por cámara + instalación y entrenamiento personalizado.
 - **Diferenciadores:** reglas editables por zona sin reentrenar, explicabilidad de cada alerta, funcionamiento local (sin enviar video a la nube).
@@ -239,11 +239,11 @@ model.train(data="training/data.yaml", epochs=100, imgsz=640, batch=16)
 
 ---
 
-## 🚀 Instalación rápida
+## Instalación rápida
 
 ```bash
 git clone https://github.com/tu-usuario/guardian-epp.git
-cd guardian-epp
+cd InspectorEPP
 python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Linux/Mac
@@ -256,15 +256,17 @@ python main.py --source 0
 ```text
 ultralytics>=8.0.0
 opencv-python>=4.8.0
-numpy
+numpy>=1.24.0
 pyttsx3>=2.90
 pyserial>=3.5
-customtkinter>=5.2.0
+supervision>=0.22.0
+PySide6-Essentials>=6.7.0,<6.8
+PySide6-Fluent-Widgets>=1.11.3
 ```
 
 ---
 
-## 📄 Créditos
+## Créditos
 
 Proyecto de la materia de **Inteligencia Artificial**.
 Modelos y datasets: Roboflow Universe / Ultralytics YOLOv8 (revisar licencias de cada uno).

@@ -1,21 +1,24 @@
 """
-Editor de Zonas de Seguridad — layout minimalista.
+Editor de Zonas de Seguridad — PyQt-Fluent-Widgets.
+El lienzo interactivo (ZoneCanvas) se conserva igual; los paneles migran a
+CardWidget, ComboBox, LineEdit, botones Fluent y MessageBox de qfluentwidgets.
 """
 
 import os
 import json
+import time
 import cv2
-import numpy as np
 from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QBrush, QColor, QFont
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QComboBox, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QListWidgetItem
 )
 
-from src.ui.icons import icon_save, icon_trash, icon_eraser
-from src.ui.ui_helpers import set_role, tint_icon
+from qfluentwidgets import (
+    CardWidget, ComboBox, LineEdit, ListWidget,
+    PrimaryPushButton, PushButton, BodyLabel, CaptionLabel, FluentIcon as FIF,
+    MessageBox, ScrollArea, isDarkTheme
+)
 
 PROFILE_COLORS = {
     "SOLDADURA":   (209, 52, 56),
@@ -25,7 +28,7 @@ PROFILE_COLORS = {
 
 
 class ZoneCanvas(QLabel):
-    """Lienzo interactivo para dibujar polígonos de zonas."""
+    """Lienzo interactivo para dibujar polígonos de zonas (sin cambios)."""
     point_added = Signal(int, int)
 
     def __init__(self, parent=None):
@@ -34,14 +37,24 @@ class ZoneCanvas(QLabel):
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(640, 400)
         self.setMouseTracking(True)
+        self.setStyleSheet(
+            "background-color: #0f1014; border-radius: 8px;"
+        )
 
         self.background_frame = None
+        self.background_pixmap = None
         self.current_points = []
         self.existing_zones = []
         self.selected_zone_name = None
 
     def set_background_frame(self, frame_bgr):
+        """Recibe un frame BGR de OpenCV y lo convierte una sola vez."""
         self.background_frame = frame_bgr.copy()
+        img_h, img_w, ch = self.background_frame.shape
+        frame_rgb = cv2.cvtColor(self.background_frame, cv2.COLOR_BGR2RGB)
+        qimg = QImage(frame_rgb.data, img_w, img_h, ch * img_w, QImage.Format_RGB888)
+        # .copy() para desacoplar de la vida útil del buffer numpy
+        self.background_pixmap = QPixmap.fromImage(qimg.copy())
         self.update()
 
     def clear_current_points(self):
@@ -101,16 +114,13 @@ class ZoneCanvas(QLabel):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        if self.background_frame is not None:
-            img_h, img_w, ch = self.background_frame.shape
-            frame_rgb = cv2.cvtColor(self.background_frame, cv2.COLOR_BGR2RGB)
-            qimg = QImage(frame_rgb.data, img_w, img_h, ch * img_w, QImage.Format_RGB888)
-            pix = QPixmap.fromImage(qimg)
+        if self.background_pixmap is not None:
+            img_h, img_w, _ = self.background_frame.shape
             scale = min(self.width() / img_w, self.height() / img_h)
             dw, dh = int(img_w * scale), int(img_h * scale)
             ox = (self.width() - dw) // 2
             oy = (self.height() - dh) // 2
-            painter.drawPixmap(ox, oy, dw, dh, pix)
+            painter.drawPixmap(ox, oy, dw, dh, self.background_pixmap)
         else:
             painter.setPen(QColor("#8a8a8a"))
             painter.setFont(QFont("Segoe UI", 11))
@@ -146,71 +156,82 @@ class ZoneCanvas(QLabel):
                 painter.drawLine(qpts[0], qpts[1])
             painter.setPen(QPen(QColor("#ffffff"), 2))
             painter.setBrush(QBrush(QColor("#d13438")))
-            for i, p in enumerate(qpts):
+            for p in qpts:
                 painter.drawEllipse(p, 4, 4)
 
 
-class ZoneEditorView(QWidget):
+class ZoneEditorView(ScrollArea):
     zones_updated = Signal()
+    # Emitida cuando el usuario cambia la cámara a editar ("camara_0", ...);
+    # la ventana la conecta para apuntar el worker a esa fuente de video.
+    camera_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("zonesView")
+        self.setWidgetResizable(True)
+
         self.config_path = "config/zones.json"
         self.rules_path = "config/rules.json"
         self.current_cam = "camara_0"
+        self._frozen = False          # imagen congelada para trazar cómodo
+        self._last_bg_ts = 0.0        # throttle del refresco de fondo
+
+        self.container = QWidget()
+        self.main = QHBoxLayout(self.container)
+        self.main.setContentsMargins(24, 16, 24, 16)
+        self.main.setSpacing(16)
+        self.setWidget(self.container)
+
         self._init_ui()
         self._load_profiles()
         self._load_zones()
 
     def _init_ui(self):
-        main = QHBoxLayout(self)
-        main.setContentsMargins(20, 16, 20, 16)
-        main.setSpacing(16)
-
         # Lienzo
         canvas_col = QVBoxLayout()
         canvas_col.setSpacing(8)
 
-        hint = QLabel("Clic izquierdo: punto  |  Clic derecho: deshacer")
-        set_role(hint, "caption")
+        hint = CaptionLabel("Clic izquierdo: punto   |   Clic derecho: deshacer")
+        canvas_col.addWidget(hint)
 
         self.canvas = ZoneCanvas()
         self.canvas.point_added.connect(self._on_point_added)
+        canvas_col.addWidget(self.canvas, stretch=1)
 
         foot = QHBoxLayout()
-        self.lbl_points = QLabel("Puntos: 0")
-        set_role(self.lbl_points, "field")
-        btn_clear = QPushButton("Limpiar")
-        btn_clear.setIcon(icon_eraser())
-        btn_clear.setMaximumWidth(100)
+        self.lbl_points = BodyLabel("Puntos: 0")
+        btn_clear = PushButton(FIF.BROOM, "Limpiar")
+        btn_clear.setMinimumWidth(100)
         btn_clear.clicked.connect(self._clear_points)
         foot.addWidget(self.lbl_points)
         foot.addStretch()
         foot.addWidget(btn_clear)
-
-        canvas_col.addWidget(hint)
-        canvas_col.addWidget(self.canvas, stretch=1)
+        self.btn_freeze = PushButton(FIF.PAUSE, "Congelar imagen")
+        self.btn_freeze.setMinimumWidth(120)
+        self.btn_freeze.clicked.connect(self._toggle_freeze)
+        foot.addWidget(self.btn_freeze)
         canvas_col.addLayout(foot)
-        main.addLayout(canvas_col, stretch=3)
+
+        self.main.addLayout(canvas_col, stretch=3)
 
         # Panel lateral
-        panel = QFrame()
-        panel.setProperty("class", "card")
+        panel = CardWidget()
         panel.setMinimumWidth(280)
         panel.setMaximumWidth(310)
         p = QVBoxLayout(panel)
         p.setContentsMargins(16, 16, 16, 16)
         p.setSpacing(12)
 
-        p.addWidget(set_role(QLabel("Cámara"), "field"))
-        self.cam_combo = QComboBox()
-        self.cam_combo.addItem("camara_0", "camara_0")
-        self.cam_combo.addItem("camara_1", "camara_1")
+        p.addWidget(BodyLabel("Cámara"))
+        self.cam_combo = ComboBox(panel)
+        self.cam_combo.addItem("camara_0", userData="camara_0")
+        self.cam_combo.addItem("camara_1", userData="camara_1")
         self.cam_combo.currentIndexChanged.connect(self._on_cam_changed)
         p.addWidget(self.cam_combo)
 
-        p.addWidget(set_role(QLabel("Zonas guardadas"), "field"))
-        self.zone_list = QListWidget()
+        p.addWidget(BodyLabel("Zonas guardadas"))
+        self.zone_list = ListWidget(panel)
         self.zone_list.itemClicked.connect(self._on_zone_selected)
         p.addWidget(self.zone_list, stretch=1)
 
@@ -218,31 +239,54 @@ class ZoneEditorView(QWidget):
         sep.setFrameShape(QFrame.HLine)
         p.addWidget(sep)
 
-        p.addWidget(set_role(QLabel("Nombre"), "field"))
-        self.txt_zone_name = QLineEdit()
+        p.addWidget(BodyLabel("Nombre"))
+        self.txt_zone_name = LineEdit(panel)
         self.txt_zone_name.setPlaceholderText("Ej: Estación Soldadura 1")
         p.addWidget(self.txt_zone_name)
 
-        p.addWidget(set_role(QLabel("Perfil"), "field"))
-        self.profile_combo = QComboBox()
+        p.addWidget(BodyLabel("Perfil"))
+        self.profile_combo = ComboBox(panel)
         p.addWidget(self.profile_combo)
 
-        btn_save = QPushButton("Guardar zona")
-        btn_save.setIcon(tint_icon(icon_save(), "#0078d4"))
-        btn_save.setProperty("class", "btn-primary-outline")
+        btn_save = PrimaryPushButton(FIF.SAVE, "Guardar zona")
         btn_save.clicked.connect(self._save_new_zone)
         p.addWidget(btn_save)
 
-        btn_del = QPushButton("Eliminar seleccionada")
-        btn_del.setIcon(icon_trash())
-        btn_del.setProperty("class", "btn-danger")
+        btn_del = PushButton(FIF.DELETE, "Eliminar seleccionada")
         btn_del.clicked.connect(self._delete_selected_zone)
         p.addWidget(btn_del)
 
-        main.addWidget(panel, stretch=1)
+        self.main.addWidget(panel, stretch=1)
+
+    # ── Interacción lienzo ──
 
     def set_sample_frame(self, frame_bgr):
+        """
+        Recibe frames en vivo del worker (llamado por MainWindow).
+        - Throttle a ~5 Hz para no repintar el lienzo a 30 fps.
+        - Si la imagen está congelada (trazado en curso), solo se
+          almacena el último frame; se aplicará al reanudar.
+        """
+        if frame_bgr is None:
+            return
+        now = time.time()
+        if self._frozen:
+            return
+        if now - self._last_bg_ts < 0.2:
+            return
+        self._last_bg_ts = now
         self.canvas.set_background_frame(frame_bgr)
+
+    def _toggle_freeze(self):
+        """Congela el fondo actual para trazar, o reanuda el vivo."""
+        self._frozen = not self._frozen
+        if self._frozen:
+            self.btn_freeze.setText("Reanudar imagen")
+            self.btn_freeze.setIcon(FIF.SYNC)
+        else:
+            self.btn_freeze.setText("Congelar imagen")
+            self.btn_freeze.setIcon(FIF.PAUSE)
+            self._last_bg_ts = 0.0  # refrescar de inmediato
 
     def _on_point_added(self, x, y):
         self.lbl_points.setText(f"Puntos: {len(self.canvas.current_points)}")
@@ -251,18 +295,20 @@ class ZoneEditorView(QWidget):
         self.canvas.clear_current_points()
         self.lbl_points.setText("Puntos: 0")
 
+    # ── Datos ──
+
     def _load_profiles(self):
         self.profile_combo.clear()
         if os.path.exists(self.rules_path):
             try:
                 with open(self.rules_path, "r", encoding="utf-8") as f:
                     for name in json.load(f).keys():
-                        self.profile_combo.addItem(name, name)
+                        self.profile_combo.addItem(name, userData=name)
             except Exception:
                 pass
         if self.profile_combo.count() == 0:
-            self.profile_combo.addItem("GENERAL", "GENERAL")
-            self.profile_combo.addItem("SOLDADURA", "SOLDADURA")
+            self.profile_combo.addItem("GENERAL", userData="GENERAL")
+            self.profile_combo.addItem("SOLDADURA", userData="SOLDADURA")
 
     def _load_zones(self):
         self.zone_list.clear()
@@ -276,13 +322,18 @@ class ZoneEditorView(QWidget):
         self.canvas.set_existing_zones(zones)
         for z in zones:
             n = len(z.get("poligono", []))
-            item = QListWidgetItem(f"{z.get('nombre')}  ({z.get('perfil')}) — {n} pts")
+            item = QListWidgetItem(
+                f"{z.get('nombre')}  ({z.get('perfil')}) — {n} pts"
+            )
             item.setData(Qt.UserRole, z)
             self.zone_list.addItem(item)
         self.canvas.set_selected_zone(None)
 
     def _on_cam_changed(self, index):
         self.current_cam = self.cam_combo.currentData()
+        # Avisar a MainWindow para apuntar el worker a la cámara editada
+        # (el fondo del lienzo debe corresponder a estas zonas).
+        self.camera_selected.emit(self.current_cam)
         self._load_zones()
 
     def _on_zone_selected(self, item):
@@ -299,10 +350,14 @@ class ZoneEditorView(QWidget):
         profile = self.profile_combo.currentData()
         points = self.canvas.current_points
         if not name:
-            QMessageBox.warning(self, "Atención", "Ingresa un nombre para la zona.")
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            InfoBar.warning("Atención", "Ingresa un nombre para la zona.",
+                            parent=self, position=InfoBarPosition.TOP, duration=2500)
             return
         if len(points) < 3:
-            QMessageBox.warning(self, "Atención", "Se requieren al menos 3 puntos.")
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            InfoBar.warning("Atención", "Se requieren al menos 3 puntos.",
+                            parent=self, position=InfoBarPosition.TOP, duration=2500)
             return
 
         all_data = {}
@@ -313,10 +368,7 @@ class ZoneEditorView(QWidget):
             except Exception:
                 pass
 
-        if self.current_cam not in all_data:
-            all_data[self.current_cam] = []
-
-        all_data[self.current_cam].append({
+        all_data.setdefault(self.current_cam, []).append({
             "nombre": name, "perfil": profile, "poligono": points
         })
 
@@ -328,18 +380,19 @@ class ZoneEditorView(QWidget):
             self._load_zones()
             self.zones_updated.emit()
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            InfoBar.error("Error", str(e),
+                          parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def _delete_selected_zone(self):
         item = self.zone_list.currentItem()
         if not item:
             return
         d = item.data(Qt.UserRole)
-        if QMessageBox.question(
-            self, "Confirmar",
-            f"Eliminar zona '{d.get('nombre')}'?",
-            QMessageBox.Yes | QMessageBox.No
-        ) == QMessageBox.Yes:
+        dlg = MessageBox(
+            "Confirmar", f"Eliminar zona '{d.get('nombre')}'?", self.window()
+        )
+        if dlg.exec():
             all_data = {}
             if os.path.exists(self.config_path):
                 with open(self.config_path, "r", encoding="utf-8") as f:

@@ -1,112 +1,132 @@
 """
-Editor de Perfiles de EPP — layout minimalista.
+Editor de Perfiles de EPP — PyQt-Fluent-Widgets.
+ListWidget Fluent + CardWidget con checkboxes, InfoBar y MessageBox de qfluentwidgets.
 """
 
 import os
 import json
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QListWidget, QListWidgetItem, QCheckBox,
-    QLineEdit, QMessageBox, QGridLayout, QInputDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QGridLayout, QCheckBox, QListWidgetItem
 )
 
-from src.ui.icons import icon_save, icon_plus, icon_trash
-from src.ui.ui_helpers import set_role, tint_icon, Toast
+from qfluentwidgets import (
+    CardWidget, ListWidget, PrimaryPushButton, PushButton,
+    BodyLabel, CaptionLabel, SubtitleLabel, LineEdit, FluentIcon as FIF,
+    InfoBar, InfoBarPosition, MessageBox, MessageBoxBase,
+    ScrollArea, isDarkTheme
+)
+
+DEFAULT_CLASSES = {
+    "helmet": "Casco de seguridad",
+    "vest": "Chaleco reflectante",
+    "welding_mask": "Careta de soldadura",
+    "glasses": "Lentes de seguridad",
+    "gloves": "Guantes de protección",
+    "mask": "Cubrebocas",
+    "boots": "Botas con casquillo",
+}
 
 
-class RulesEditorView(QWidget):
+class NameDialog(MessageBoxBase):
+    """Diálogo Fluent para pedir el nombre de un nuevo perfil."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel("Nuevo perfil")
+        self.edit = LineEdit(self)
+        self.edit.setPlaceholderText("Nombre (ej: ALTURAS, PINTURA)")
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.edit)
+        self.yesButton.setText("Crear")
+        self.cancelButton.setText("Cancelar")
+        self.widget.setMinimumWidth(420)
+
+    def name(self):
+        return self.edit.text().strip().upper()
+
+
+class RulesEditorView(ScrollArea):
     rules_updated = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("rulesView")
+        self.setWidgetResizable(True)
+
         self.rules_path = "config/rules.json"
         self.classes_path = "config/classes.json"
         self.rules_data = {}
         self.classes_data = {}
         self.selected_profile = None
-        self.toast = Toast(self)
 
         self._load_classes()
+
+        self.container = QWidget()
+        self.main = QHBoxLayout(self.container)
+        self.main.setContentsMargins(24, 16, 24, 16)
+        self.main.setSpacing(16)
+        self.setWidget(self.container)
         self._init_ui()
         self._load_rules()
 
     def _load_classes(self):
-        default = {
-            "helmet": "Casco de seguridad",
-            "vest": "Chaleco reflectante",
-            "welding_mask": "Careta de soldadura",
-            "glasses": "Lentes de seguridad",
-            "gloves": "Guantes de protección",
-            "mask": "Cubrebocas",
-            "boots": "Botas con casquillo",
-        }
         if os.path.exists(self.classes_path):
             try:
                 with open(self.classes_path, "r", encoding="utf-8") as f:
                     self.classes_data = json.load(f)
                     self.classes_data.pop("person", None)
             except Exception:
-                self.classes_data = default
+                self.classes_data = dict(DEFAULT_CLASSES)
         else:
-            self.classes_data = default
+            self.classes_data = dict(DEFAULT_CLASSES)
 
     def _init_ui(self):
-        main = QHBoxLayout(self)
-        main.setContentsMargins(20, 16, 20, 16)
-        main.setSpacing(16)
+        # ── Lista de perfiles ──
+        left = CardWidget()
+        left.setMinimumWidth(240)
+        left.setMaximumWidth(280)
+        l = QVBoxLayout(left)
+        l.setContentsMargins(16, 16, 16, 16)
+        l.setSpacing(12)
 
-        # Lista de perfiles
-        left = QFrame()
-        left.setProperty("class", "card")
-        left.setMinimumWidth(220)
-        left.setMaximumWidth(260)
-        l_layout = QVBoxLayout(left)
-        l_layout.setContentsMargins(16, 16, 16, 16)
-        l_layout.setSpacing(10)
+        l.addWidget(SubtitleLabel("Perfiles de zona"))
 
-        l_layout.addWidget(set_role(QLabel("Perfiles de zona"), "section"))
-
-        self.profile_list = QListWidget()
+        self.profile_list = ListWidget(left)
         self.profile_list.itemClicked.connect(self._on_profile_clicked)
-        l_layout.addWidget(self.profile_list, stretch=1)
+        l.addWidget(self.profile_list, stretch=1)
 
         btns = QHBoxLayout()
-        btn_add = QPushButton("Nuevo")
-        btn_add.setIcon(icon_plus())
-        btn_add.setProperty("class", "btn-primary")
+        btn_add = PrimaryPushButton(FIF.ADD, "Nuevo")
         btn_add.clicked.connect(self._add_profile)
-        self.btn_del = QPushButton("Eliminar")
-        self.btn_del.setIcon(icon_trash())
-        self.btn_del.setProperty("class", "btn-danger")
+        self.btn_del = PushButton(FIF.DELETE, "Eliminar")
         self.btn_del.setEnabled(False)
         self.btn_del.clicked.connect(self._del_profile)
         btns.addWidget(btn_add)
         btns.addWidget(self.btn_del)
-        l_layout.addLayout(btns)
+        l.addLayout(btns)
 
-        main.addWidget(left, stretch=1)
+        self.main.addWidget(left, stretch=1)
 
-        # Editor
-        right = QFrame()
-        right.setProperty("class", "card")
+        # ── Editor ──
+        right = CardWidget()
         right.setMaximumWidth(760)
         r = QVBoxLayout(right)
         r.setContentsMargins(20, 20, 20, 20)
         r.setSpacing(14)
 
-        self.profile_header = QLabel("Ninguno seleccionado")
-        set_role(self.profile_header, "section")
+        self.profile_header = SubtitleLabel("Ninguno seleccionado")
         r.addWidget(self.profile_header)
 
-        r.addWidget(set_role(QLabel("EPP obligatorio"), "field"))
+        r.addWidget(BodyLabel("EPP obligatorio"))
 
         grid = QGridLayout()
         grid.setSpacing(10)
         self.checkboxes = {}
         row, col = 0, 0
         for key, label in self.classes_data.items():
-            cb = QCheckBox(f"{label}")
+            cb = QCheckBox(label)
             self.checkboxes[key] = cb
             grid.addWidget(cb, row, col)
             col += 1
@@ -119,8 +139,8 @@ class RulesEditorView(QWidget):
         sep.setFrameShape(QFrame.HLine)
         r.addWidget(sep)
 
-        r.addWidget(set_role(QLabel("Mensaje de advertencia"), "field"))
-        self.txt_message = QLineEdit()
+        r.addWidget(BodyLabel("Mensaje de advertencia"))
+        self.txt_message = LineEdit(right)
         self.txt_message.setPlaceholderText(
             "Texto que se mostrará y reproducirá por voz"
         )
@@ -128,13 +148,13 @@ class RulesEditorView(QWidget):
 
         r.addStretch()
 
-        btn_save = QPushButton("Guardar cambios")
-        btn_save.setIcon(tint_icon(icon_save(), "#ffffff"))
-        btn_save.setProperty("class", "btn-primary")
+        btn_save = PrimaryPushButton(FIF.SAVE, "Guardar cambios")
         btn_save.clicked.connect(self._save_changes)
         r.addWidget(btn_save)
 
-        main.addWidget(right, stretch=2)
+        self.main.addWidget(right, stretch=2)
+
+    # ── Datos ──
 
     def _load_rules(self):
         self.profile_list.clear()
@@ -173,13 +193,14 @@ class RulesEditorView(QWidget):
         self.txt_message.setText(msg)
 
     def _add_profile(self):
-        name, ok = QInputDialog.getText(
-            self, "Nuevo perfil", "Nombre (ej: ALTURAS, PINTURA):"
-        )
-        if ok and name.strip():
-            name = name.strip().upper()
+        dlg = NameDialog(self.window())
+        if dlg.exec():
+            name = dlg.name()
+            if not name:
+                return
             if name in self.rules_data:
-                QMessageBox.warning(self, "Atención", f"'{name}' ya existe.")
+                InfoBar.warning("Atención", f"'{name}' ya existe.",
+                                parent=self, position=InfoBarPosition.TOP, duration=2500)
                 return
             self.rules_data[name] = {
                 "requeridos": ["helmet", "vest"],
@@ -191,11 +212,12 @@ class RulesEditorView(QWidget):
     def _del_profile(self):
         if not self.selected_profile:
             return
-        if QMessageBox.question(
-            self, "Confirmar",
+        dlg = MessageBox(
+            "Confirmar",
             f"Eliminar perfil '{self.selected_profile}'?",
-            QMessageBox.Yes | QMessageBox.No
-        ) == QMessageBox.Yes:
+            self.window()
+        )
+        if dlg.exec():
             self.rules_data.pop(self.selected_profile, None)
             self.selected_profile = None
             self._save_to_file()
@@ -212,16 +234,20 @@ class RulesEditorView(QWidget):
             "mensaje_error": msg,
         }
         if self._save_to_file():
-            self.toast.show_message(
-                f"Reglas de '{self.selected_profile}' guardadas"
+            InfoBar.success(
+                "Reglas",
+                f"Reglas de '{self.selected_profile}' guardadas",
+                parent=self, position=InfoBarPosition.TOP, duration=2500
             )
             self.rules_updated.emit()
 
     def _save_to_file(self):
         try:
+            os.makedirs("config", exist_ok=True)
             with open(self.rules_path, "w", encoding="utf-8") as f:
                 json.dump(self.rules_data, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            InfoBar.error("Error", str(e),
+                          parent=self, position=InfoBarPosition.TOP, duration=4000)
             return False

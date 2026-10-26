@@ -1,20 +1,23 @@
 """
-Historial de Eventos — layout minimalista.
+Historial de Eventos — PyQt-Fluent-Widgets.
+TableWidget (Fluent), SearchLineEdit, ComboBox, PrimaryPushButton, InfoBar.
 """
 
 import csv
 import os
 import json
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QTableWidget, QTableWidgetItem, QHeaderView,
-    QLineEdit, QComboBox, QFileDialog, QMessageBox, QStackedWidget
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QStackedWidget,
+    QHeaderView, QTableWidgetItem, QAbstractItemView
 )
 
-from src.ui.icons import icon_download, icon_trash
-from src.ui.ui_helpers import set_role
+from qfluentwidgets import (
+    CardWidget, TableWidget, SearchLineEdit, ComboBox, PrimaryPushButton,
+    PushButton, BodyLabel, CaptionLabel, FluentIcon as FIF, InfoBar,
+    InfoBarPosition, isDarkTheme
+)
 
 DEMO_DATA = False
 
@@ -24,10 +27,13 @@ STATE_COLOR = {
     "Activo": "#107c10",
 }
 
+HEADERS = ["Hora", "Cámara", "Zona", "Persona", "Infracción", "Regla", "Relé"]
+
 
 class EventsView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("eventsView")
         self.records = []
         self._init_ui()
         self._load_zones()
@@ -37,30 +43,27 @@ class EventsView(QWidget):
 
     def _init_ui(self):
         main = QVBoxLayout(self)
-        main.setContentsMargins(20, 16, 20, 16)
-        main.setSpacing(10)
+        main.setContentsMargins(24, 16, 24, 16)
+        main.setSpacing(12)
 
         # Toolbar
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
 
-        self.search_box = QLineEdit()
+        self.search_box = SearchLineEdit()
         self.search_box.setPlaceholderText("Filtrar...")
-        self.search_box.setMaximumWidth(220)
+        self.search_box.setFixedWidth(240)
         self.search_box.textChanged.connect(self._apply_filter)
 
-        self.zone_filter = QComboBox()
-        self.zone_filter.addItem("Todas", "ALL")
-        self.zone_filter.setMaximumWidth(160)
+        self.zone_filter = ComboBox()
+        self.zone_filter.addItem("Todas", userData="ALL")
+        self.zone_filter.setMinimumWidth(160)
         self.zone_filter.currentIndexChanged.connect(self._apply_filter)
 
-        btn_export = QPushButton("Exportar CSV")
-        btn_export.setIcon(icon_download())
-        btn_export.setProperty("class", "btn-primary")
+        btn_export = PrimaryPushButton(FIF.DOWNLOAD, "Exportar CSV")
         btn_export.clicked.connect(self._export_to_csv)
 
-        btn_clear = QPushButton("Limpiar")
-        btn_clear.setIcon(icon_trash())
+        btn_clear = PushButton(FIF.DELETE, "Limpiar")
         btn_clear.clicked.connect(self._clear_records)
 
         toolbar.addWidget(self.search_box)
@@ -68,33 +71,32 @@ class EventsView(QWidget):
         toolbar.addStretch()
         toolbar.addWidget(btn_export)
         toolbar.addWidget(btn_clear)
-
         main.addLayout(toolbar)
 
-        # Tabla
-        self.table = QTableWidget()
+        # Tabla Fluent
+        self.table = TableWidget(self)
+        self.table.setBorderVisible(True)
+        self.table.setWordWrap(False)
+        self.table.setCornerButtonEnabled(False)
         self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels([
-            "Hora", "Cámara", "Zona", "Persona",
-            "Infracción", "Regla", "Relé"
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setHorizontalHeaderLabels(HEADERS)
+        # Header grande estilo Win11, primera/última columnas auto-ajustadas
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setDefaultSectionSize(34)
-        self.table.setFocusPolicy(Qt.NoFocus)
+        self.table.verticalHeader().setDefaultSectionSize(36)
+        self.table.setBorderVisible(True)
 
         # Estado vacío
         self.empty_page = QWidget()
         ep = QVBoxLayout(self.empty_page)
-        empty_lbl = QLabel("Sin registros de infracciones")
-        set_role(empty_lbl, "muted")
+        empty_lbl = BodyLabel("Sin registros de infracciones")
+        empty_lbl.setStyleSheet("color: #8a8a8a;")
         empty_lbl.setAlignment(Qt.AlignCenter)
         ep.addStretch()
         ep.addWidget(empty_lbl)
@@ -105,10 +107,12 @@ class EventsView(QWidget):
         self.view_stack.addWidget(self.empty_page)
         main.addWidget(self.view_stack, stretch=1)
 
+    # ── Zonas ──
+
     def _load_zones(self):
         self.zone_filter.blockSignals(True)
         self.zone_filter.clear()
-        self.zone_filter.addItem("Todas", "ALL")
+        self.zone_filter.addItem("Todas", userData="ALL")
         if os.path.exists("config/zones.json"):
             try:
                 with open("config/zones.json", "r", encoding="utf-8") as f:
@@ -119,7 +123,7 @@ class EventsView(QWidget):
                         if z.get("nombre"):
                             names.add(z["nombre"])
                 for name in sorted(names):
-                    self.zone_filter.addItem(name, name)
+                    self.zone_filter.addItem(name, userData=name)
             except Exception:
                 pass
         self.zone_filter.blockSignals(False)
@@ -138,6 +142,8 @@ class EventsView(QWidget):
         for s in samples:
             self.add_event(*s)
 
+    # ── Registros ──
+
     def add_event(self, ts, cam, zone, person, infraction, rule, relay):
         record = {
             "timestamp": ts, "cam": cam, "zone": zone,
@@ -148,15 +154,16 @@ class EventsView(QWidget):
         row = self.table.rowCount()
         self.table.insertRow(row)
         items = [
-            QTableWidgetItem(ts), QTableWidgetItem(cam),
-            QTableWidgetItem(zone), QTableWidgetItem(person),
-            QTableWidgetItem(infraction), QTableWidgetItem(rule),
-            QTableWidgetItem(relay)
+            self.table._make_item(ts), self.table._make_item(cam),
+            self.table._make_item(zone), self.table._make_item(person),
+            self.table._make_item(infraction), self.table._make_item(rule),
+            self.table._make_item(relay)
         ]
         color = STATE_COLOR.get(relay)
         if color:
-            items[4].setForeground(QColor(color))
-            items[6].setForeground(QColor(color))
+            brush = QBrush(QColor(color))
+            items[4].setForeground(brush)
+            items[6].setForeground(brush)
 
         for col, itm in enumerate(items):
             self.table.setItem(row, col, itm)
@@ -186,10 +193,14 @@ class EventsView(QWidget):
         )
         self.view_stack.setCurrentIndex(0 if any_visible else 1)
 
+    # ── Exportar / limpiar ──
+
     def _export_to_csv(self):
         if not self.records:
-            QMessageBox.information(self, "Aviso", "Sin registros.")
+            InfoBar.info("Aviso", "Sin registros.",
+                         parent=self, position=InfoBarPosition.TOP, duration=2500)
             return
+        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(
             self, "Exportar", "reporte_epp.csv", "CSV (*.csv)"
         )
@@ -198,15 +209,15 @@ class EventsView(QWidget):
         try:
             with open(path, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
-                w.writerow(["Hora", "Cámara", "Zona", "Persona", "Infracción", "Regla", "Relé"])
+                w.writerow(HEADERS)
                 for r in self.records:
-                    w.writerow([
-                        r["timestamp"], r["cam"], r["zone"], r["person"],
-                        r["infraction"], r["rule"], r["relay"]
-                    ])
-            QMessageBox.information(self, "Exportado", f"Guardado en:\n{path}")
+                    w.writerow([r["timestamp"], r["cam"], r["zone"], r["person"],
+                                r["infraction"], r["rule"], r["relay"]])
+            InfoBar.success("Exportado", f"Guardado en:\n{path}",
+                            parent=self, position=InfoBarPosition.TOP, duration=3000)
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            InfoBar.error("Error", str(e),
+                          parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def _clear_records(self):
         self.records.clear()

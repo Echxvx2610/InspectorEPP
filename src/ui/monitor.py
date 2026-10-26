@@ -1,34 +1,37 @@
 """
-Pantalla de Monitoreo en Tiempo Real — layout minimalista.
-Muestra video de cámara/archivo o estado en negro con icono si no está disponible.
+Pantalla de Monitoreo en Tiempo Real — PyQt-Fluent-Widgets.
+CardWidget, ComboBox, PushButton, InfoBadge (chips de estado), BodyLabel/CaptionLabel.
 """
 
 import cv2
-import numpy as np
 from PySide6.QtCore import Qt, Slot, Signal, QRect
 from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QFont
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QPushButton, QFrame, QListWidget, QListWidgetItem,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QSizePolicy, QGridLayout, QFileDialog, QStackedWidget
 )
 
+from qfluentwidgets import (
+    CardWidget, ComboBox, PushButton, PrimaryPushButton, BodyLabel,
+    CaptionLabel, SubtitleLabel, StrongBodyLabel, ScrollArea,
+    ListWidget, InfoBadge, InfoBadgePosition, FluentIcon as FIF,
+    isDarkTheme, Theme
+)
+
 from src.ui.icons import (
-    icon_pause, icon_play,
     pixmap_check, pixmap_x, pixmap_dot, pixmap_camera_off
 )
-from src.ui.ui_helpers import StatusChip, set_role, set_state
 
 
 class VideoLabel(QLabel):
-    """Visor de video responsivo que mantiene relación de aspecto o muestra pantalla negra con icono sin cámara."""
+    """Visor de video responsivo o pantalla negra con icono si no hay cámara."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignCenter)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setStyleSheet(
-            "background-color: #0c0d0e; border: 1px solid #e0e0e0;"
-            "border-radius: 4px;"
+            "background-color: #0c0d0e; border-radius: 8px;"
         )
         self.setMinimumSize(480, 320)
         self._current_pixmap = None
@@ -40,11 +43,9 @@ class VideoLabel(QLabel):
             self._current_pixmap = None
             self._update_display()
             return
-
         h, w, ch = frame_bgr.shape
-        bytes_per_line = ch * w
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        qimg = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        qimg = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
         self._current_pixmap = QPixmap.fromImage(qimg)
         self._update_display()
 
@@ -66,209 +67,209 @@ class VideoLabel(QLabel):
                 self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
             self.setPixmap(scaled)
+            return
+
+        placeholder = QPixmap(w, h)
+        placeholder.fill(QColor("#0d0f12"))
+        painter = QPainter(placeholder)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        icon_size = 48
+        cam_pixmap = pixmap_camera_off(color="#4b5563", size=icon_size)
+        ix = (w - icon_size) // 2
+        iy = (h - icon_size) // 2 - 18
+        painter.drawPixmap(ix, iy, cam_pixmap)
+
+        painter.setPen(QColor("#9ca3af"))
+        font = QFont("Segoe UI", 11)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(QRect(0, iy + icon_size + 14, w, 22),
+                         Qt.AlignCenter, self._no_camera_message)
+
+        painter.setPen(QColor("#6b7280"))
+        painter.setFont(QFont("Segoe UI", 9))
+        painter.drawText(QRect(0, iy + icon_size + 36, w, 20),
+                         Qt.AlignCenter,
+                         "Conecte un dispositivo o seleccione otra fuente")
+        painter.end()
+        self.setPixmap(placeholder)
+
+
+class StatusBadge(QWidget):
+    """Equivalente Fluent del StatusChip: [● texto] usando InfoBadge."""
+
+    _STYLE = {
+        "idle": ("#9a9a9a", "#f5f5f5"),
+        "ok":   ("#107c10", "#f1faf1"),
+        "warn": ("#f7630c", "#fff8e5"),
+        "bad":  ("#d13438", "#fdf3f4"),
+    }
+
+    def __init__(self, text="", state="idle", parent=None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 5, 14, 5)
+        lay.setSpacing(8)
+
+        fg, bg = self._STYLE.get(state, self._STYLE["idle"])
+        self.badge = InfoBadge.error(text) if state == "bad" else (
+            InfoBadge.success(text) if state == "ok" else (
+                InfoBadge.warning(text) if state == "warn" else InfoBadge.info(text)
+            )
+        )
+        lay.addWidget(self.badge)
+
+    def set_status(self, text, state):
+        fg, bg = self._STYLE.get(state, self._STYLE["idle"])
+        lay = self.layout()
+        lay.removeWidget(self.badge)
+        self.badge.deleteLater()
+        if state == "bad":
+            self.badge = InfoBadge.error(text)
+        elif state == "ok":
+            self.badge = InfoBadge.success(text)
+        elif state == "warn":
+            self.badge = InfoBadge.warning(text)
         else:
-            # Pantalla negra limpia con icono SVG de cámara no disponible
-            placeholder = QPixmap(w, h)
-            placeholder.fill(QColor("#0d0f12"))
-            painter = QPainter(placeholder)
-            painter.setRenderHint(QPainter.Antialiasing)
-
-            icon_size = 48
-            cam_icon_pixmap = pixmap_camera_off(color="#4b5563", size=icon_size)
-            ix = (w - icon_size) // 2
-            iy = (h - icon_size) // 2 - 18
-            painter.drawPixmap(ix, iy, cam_icon_pixmap)
-
-            # Texto de estado minimalista
-            painter.setPen(QColor("#9ca3af"))
-            font = QFont("Segoe UI", 11)
-            font.setBold(True)
-            painter.setFont(font)
-            text_rect = QRect(0, iy + icon_size + 14, w, 22)
-            painter.drawText(text_rect, Qt.AlignCenter, self._no_camera_message)
-
-            painter.setPen(QColor("#6b7280"))
-            sub_font = QFont("Segoe UI", 9)
-            painter.setFont(sub_font)
-            sub_rect = QRect(0, iy + icon_size + 36, w, 20)
-            painter.drawText(sub_rect, Qt.AlignCenter, "Conecte un dispositivo o seleccione otra fuente")
-
-            painter.end()
-            self.setPixmap(placeholder)
+            self.badge = InfoBadge.info(text)
+        lay.addWidget(self.badge)
 
 
-class MonitorView(QWidget):
+class MonitorView(ScrollArea):
     camera_changed = Signal(object, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._init_ui()
+        self.setObjectName("monitorView")
+        self.setWidgetResizable(True)
         self._current_metadata = {}
 
-    def _init_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 16, 20, 16)
-        main_layout.setSpacing(12)
+        container = QWidget()
+        self.vBoxLayout = QVBoxLayout(container)
+        self.vBoxLayout.setContentsMargins(24, 16, 24, 16)
+        self.vBoxLayout.setSpacing(12)
+        self.setWidget(container)
+        self._init_ui()
 
+    def _init_ui(self):
         # ── Toolbar ──
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
 
-        cam_lbl = QLabel("Fuente")
-        set_role(cam_lbl, "field")
-        self.cam_combo = QComboBox()
-        self.cam_combo.addItem("Cámara 0", 0)
-        self.cam_combo.addItem("Cámara 1", 1)
-        self.cam_combo.addItem("Cámara 2", 2)
-        self.cam_combo.addItem("Archivo de video...", "FILE")
-        self.cam_combo.setMaximumWidth(170)
+        toolbar.addWidget(BodyLabel("Fuente"))
+        self.cam_combo = ComboBox()
+        self.cam_combo.addItems(["Cámara 0", "Cámara 1", "Cámara 2", "Archivo de video..."])
+        self.cam_combo.setItemData(0, 0); self.cam_combo.setItemData(1, 1)
+        self.cam_combo.setItemData(2, 2); self.cam_combo.setItemData(3, "FILE")
+        self.cam_combo.setCurrentIndex(0)
+        self.cam_combo.setMinimumWidth(170)
         self.cam_combo.currentIndexChanged.connect(self._on_camera_select)
 
-        self.chip_fps = StatusChip("-- fps", "idle")
-        self.chip_signal = StatusChip("Sin señal", "bad")
-        self.chip_relay = StatusChip("Relé inactivo", "idle")
+        self.chip_fps = StatusBadge("-- fps", "idle")
+        self.chip_signal = StatusBadge("Sin señal", "bad")
+        self.chip_relay = StatusBadge("Relé inactivo", "idle")
 
-        self.btn_pause = QPushButton("Pausar")
-        self.btn_pause.setIcon(icon_pause())
-        self.btn_pause.setMaximumWidth(110)
+        self.btn_pause = PushButton(FIF.PAUSE, "Pausar")
+        self.btn_pause.setMinimumWidth(110)
         self.btn_pause.clicked.connect(self._toggle_pause)
         self._is_paused = False
 
-        toolbar.addWidget(cam_lbl)
         toolbar.addWidget(self.cam_combo)
         toolbar.addStretch()
         toolbar.addWidget(self.chip_fps)
         toolbar.addWidget(self.chip_signal)
         toolbar.addWidget(self.chip_relay)
         toolbar.addWidget(self.btn_pause)
+        self.vBoxLayout.addLayout(toolbar)
 
-        main_layout.addLayout(toolbar)
-
-        # ── Content: video + sidebar ──
+        # ── Video + panel lateral ──
         content = QHBoxLayout()
         content.setSpacing(16)
 
         self.video_view = VideoLabel()
         content.addWidget(self.video_view, stretch=3)
 
-        # ── Sidebar panel ──
-        panel = QFrame()
-        panel.setProperty("class", "card")
+        panel = CardWidget()
         panel.setMinimumWidth(260)
-        panel.setMaximumWidth(290)
-        p_layout = QVBoxLayout(panel)
-        p_layout.setContentsMargins(16, 16, 16, 16)
-        p_layout.setSpacing(14)
+        panel.setMaximumWidth(300)
+        p = QVBoxLayout(panel)
+        p.setContentsMargins(18, 18, 18, 18)
+        p.setSpacing(12)
 
-        # Zona
-        zone_caption = QLabel("Zona activa")
-        set_role(zone_caption, "caption")
-        self.zone_name_lbl = QLabel("GENERAL")
-        set_role(self.zone_name_lbl, "section")
-        p_layout.addWidget(zone_caption)
-        p_layout.addWidget(self.zone_name_lbl)
+        p.addWidget(CaptionLabel("Zona activa"))
+        self.zone_name_lbl = SubtitleLabel("GENERAL")
+        p.addWidget(self.zone_name_lbl)
 
         # Estado
         self.state_icon_lbl = QLabel()
         self.state_icon_lbl.setPixmap(pixmap_dot(size=20))
         self.state_icon_lbl.setFixedSize(20, 20)
         self.state_icon_lbl.setAlignment(Qt.AlignCenter)
-        self.state_text_lbl = QLabel("En espera")
-        self.state_text_lbl.setStyleSheet(
-            "color: #8a8a8a; font-weight: 700; font-size: 14px;"
-        )
+        self.state_text_lbl = StrongBodyLabel("En espera")
         state_row = QHBoxLayout()
         state_row.setSpacing(6)
         state_row.addWidget(self.state_icon_lbl)
         state_row.addWidget(self.state_text_lbl)
         state_row.addStretch()
-        p_layout.addLayout(state_row)
+        p.addLayout(state_row)
 
-        # Separador
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
-        p_layout.addWidget(sep)
+        p.addWidget(sep)
 
-        # Persona selector
-        self.person_combo = QComboBox()
-        self.person_combo.setMaximumWidth(200)
+        # Selector de persona
+        self.person_combo = ComboBox()
+        self.person_combo.setMinimumWidth(200)
         self.person_combo.currentIndexChanged.connect(self._on_person_selected)
-        p_layout.addWidget(self.person_combo)
+        p.addWidget(self.person_combo)
 
-        # EPP checklist
+        # Checklist EPP
         self.ppe_items = {
             "welding_mask": self._make_ppe_row("Careta"),
             "vest": self._make_ppe_row("Chaleco"),
             "gloves": self._make_ppe_row("Guantes"),
             "helmet": self._make_ppe_row("Casco"),
         }
-        for key, (row_widget, _, _) in self.ppe_items.items():
-            p_layout.addWidget(row_widget)
+        for row_widget, _, _ in self.ppe_items.values():
+            p.addWidget(row_widget)
 
-        # Separador
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
-        p_layout.addWidget(sep2)
+        p.addWidget(sep2)
 
-        # Regla
-        rule_caption = QLabel("Regla evaluada")
-        set_role(rule_caption, "caption")
-        self.rule_detail_lbl = QLabel("Sin señal de video")
+        p.addWidget(CaptionLabel("Regla evaluada"))
+        self.rule_detail_lbl = BodyLabel("Sin señal de video")
         self.rule_detail_lbl.setWordWrap(True)
-        p_layout.addWidget(rule_caption)
-        p_layout.addWidget(self.rule_detail_lbl)
+        p.addWidget(self.rule_detail_lbl)
 
-        # Metrics
         metrics = QGridLayout()
         metrics.setSpacing(4)
-        lbl_p = QLabel("Personas")
-        set_role(lbl_p, "caption")
-        self.val_p_count = QLabel("0")
-        set_role(self.val_p_count, "value")
-        lbl_v = QLabel("Infracciones")
-        set_role(lbl_v, "caption")
-        self.val_v_count = QLabel("0")
-        set_role(self.val_v_count, "value")
-        metrics.addWidget(lbl_p, 0, 0)
+        metrics.addWidget(CaptionLabel("Personas"), 0, 0)
+        self.val_p_count = SubtitleLabel("0")
         metrics.addWidget(self.val_p_count, 1, 0)
-        metrics.addWidget(lbl_v, 0, 1)
+        metrics.addWidget(CaptionLabel("Infracciones"), 0, 1)
+        self.val_v_count = SubtitleLabel("0")
         metrics.addWidget(self.val_v_count, 1, 1)
-        p_layout.addLayout(metrics)
+        p.addLayout(metrics)
 
-        p_layout.addStretch()
+        p.addStretch()
         content.addWidget(panel, stretch=1)
-        main_layout.addLayout(content, stretch=1)
+        self.vBoxLayout.addLayout(content, stretch=1)
 
-        # ── Log strip ──
+        # ── Log de eventos recientes ──
         log_header = QHBoxLayout()
-        log_title = QLabel("Eventos recientes")
-        set_role(log_title, "field")
-        btn_clear = QPushButton("Limpiar")
-        btn_clear.setMaximumWidth(70)
-        btn_clear.clicked.connect(self._clear_logs)
-        log_header.addWidget(log_title)
+        log_header.addWidget(BodyLabel("Eventos recientes"))
         log_header.addStretch()
+        btn_clear = PushButton("Limpiar")
+        btn_clear.setMinimumWidth(80)
+        btn_clear.clicked.connect(self._clear_logs)
         log_header.addWidget(btn_clear)
-        main_layout.addLayout(log_header)
+        self.vBoxLayout.addLayout(log_header)
 
-        self.log_list = QListWidget()
-        self.log_list.setMaximumHeight(100)
-
-        log_empty = QWidget()
-        le = QVBoxLayout(log_empty)
-        empty_lbl = QLabel("Sin eventos recientes")
-        set_role(empty_lbl, "muted")
-        empty_lbl.setAlignment(Qt.AlignCenter)
-        le.addStretch()
-        le.addWidget(empty_lbl)
-        le.addStretch()
-
-        self.log_stack = QStackedWidget()
-        self.log_stack.setMaximumHeight(100)
-        self.log_stack.addWidget(self.log_list)
-        self.log_stack.addWidget(log_empty)
-        self.log_stack.setCurrentIndex(1)
-        main_layout.addWidget(self.log_stack)
+        self.log_list = ListWidget()
+        self.log_list.setMinimumHeight(100)
+        self.vBoxLayout.addWidget(self.log_list)
 
     def _make_ppe_row(self, label_text):
         w = QWidget()
@@ -279,9 +280,8 @@ class MonitorView(QWidget):
         icon_lbl.setPixmap(pixmap_dot(size=14))
         icon_lbl.setFixedSize(16, 16)
         icon_lbl.setAlignment(Qt.AlignCenter)
-        text_lbl = QLabel(label_text)
-        status_lbl = QLabel("--")
-        status_lbl.setStyleSheet("color: #8a8a8a; font-weight: 600;")
+        text_lbl = BodyLabel(label_text)
+        status_lbl = BodyLabel("--")
         h.addWidget(icon_lbl)
         h.addWidget(text_lbl)
         h.addStretch()
@@ -291,7 +291,7 @@ class MonitorView(QWidget):
     # ── Slots ──
 
     def _on_camera_select(self, index):
-        data = self.cam_combo.currentData()
+        data = self.cam_combo.itemData(index)
         if data == "FILE":
             file_path, _ = QFileDialog.getOpenFileName(
                 self, "Seleccionar archivo de video", "",
@@ -300,25 +300,32 @@ class MonitorView(QWidget):
             if file_path:
                 self.camera_changed.emit(file_path, False)
             else:
-                # Volver a índice 0 si canceló
                 self.cam_combo.blockSignals(True)
                 self.cam_combo.setCurrentIndex(0)
                 self.cam_combo.blockSignals(False)
         else:
             self.camera_changed.emit(data, False)
 
+    def set_source_index(self, source):
+        """Sincroniza el combo con un source externo (p. ej. el editor de
+        zonas) sin re-emitir camera_changed."""
+        idx = self.cam_combo.findData(int(source) if isinstance(source, str) and source.isdigit() else source)
+        if idx is not None and idx >= 0:
+            self.cam_combo.blockSignals(True)
+            self.cam_combo.setCurrentIndex(idx)
+            self.cam_combo.blockSignals(False)
+
     def _toggle_pause(self):
         self._is_paused = not self._is_paused
         if self._is_paused:
             self.btn_pause.setText("Reanudar")
-            self.btn_pause.setIcon(icon_play())
+            self.btn_pause.setIcon(FIF.PLAY)
         else:
             self.btn_pause.setText("Pausar")
-            self.btn_pause.setIcon(icon_pause())
+            self.btn_pause.setIcon(FIF.PAUSE)
 
     def _clear_logs(self):
         self.log_list.clear()
-        self.log_stack.setCurrentIndex(1)
 
     @Slot(object, dict)
     def update_frame(self, frame, metadata):
@@ -333,10 +340,9 @@ class MonitorView(QWidget):
             self.chip_relay.set_status("Relé inactivo", "idle")
             self.state_icon_lbl.setPixmap(pixmap_dot(size=20))
             self.state_text_lbl.setText("Sin señal")
-            self.state_text_lbl.setStyleSheet("color: #8a8a8a; font-weight: 700; font-size: 14px;")
+            self.state_icon_lbl.setStyleSheet("color: #8a8a8a;")
             self.val_p_count.setText("0")
             self.val_v_count.setText("0")
-            set_state(self.val_v_count, "idle")
             self.rule_detail_lbl.setText("Cámara no detectada o desconectada.")
             return
 
@@ -352,11 +358,9 @@ class MonitorView(QWidget):
         if global_safe:
             self.state_icon_lbl.setPixmap(pixmap_check(size=20))
             self.state_text_lbl.setText("Conforme")
-            self.state_text_lbl.setStyleSheet("color: #107c10; font-weight: 700; font-size: 14px;")
         else:
             self.state_icon_lbl.setPixmap(pixmap_x(size=20))
             self.state_text_lbl.setText("Incumplimiento")
-            self.state_text_lbl.setStyleSheet("color: #d13438; font-weight: 700; font-size: 14px;")
 
         if relay_blocked:
             self.chip_relay.set_status("Relé bloqueado", "bad")
@@ -365,9 +369,8 @@ class MonitorView(QWidget):
 
         persons = metadata.get("persons", [])
         self.val_p_count.setText(str(len(persons)))
-        violations_count = sum(1 for p in persons if not p.get("is_safe", True))
-        self.val_v_count.setText(str(violations_count))
-        set_state(self.val_v_count, "bad" if violations_count > 0 else "idle")
+        violations = sum(1 for p in persons if not p.get("is_safe", True))
+        self.val_v_count.setText(str(violations))
 
         current_ids = [p["id"] for p in persons]
         combo_ids = [self.person_combo.itemData(i) for i in range(self.person_combo.count())]
@@ -389,13 +392,10 @@ class MonitorView(QWidget):
         for alert_txt in metadata.get("alerts", []):
             ts = metadata.get("timestamp", "")
             log_line = f"{ts}   {alert_txt}"
-            if (self.log_list.count() == 0
-                    or self.log_list.item(self.log_list.count() - 1).text() != log_line):
-                item = QListWidgetItem(log_line)
-                item.setForeground(QColor("#d13438"))
-                self.log_list.addItem(item)
+            items = self.log_list.items
+            if not items or items[-1].text() != log_line:
+                self.log_list.addItem(log_line)
                 self.log_list.scrollToBottom()
-                self.log_stack.setCurrentIndex(0)
 
     def _on_person_selected(self, index):
         self._update_person_telemetry()
@@ -404,9 +404,7 @@ class MonitorView(QWidget):
         p_id = self.person_combo.currentData()
         persons = self._current_metadata.get("persons", [])
         target = next((p for p in persons if p["id"] == p_id), None)
-
-        if not target:
-            target = persons[0] if persons else None
+        target = target or (persons[0] if persons else None)
 
         if not target:
             active_z = self._current_metadata.get("active_zone", "GENERAL")
@@ -415,7 +413,6 @@ class MonitorView(QWidget):
             for _, icon_lbl, status_lbl in self.ppe_items.values():
                 icon_lbl.setPixmap(pixmap_dot(size=14))
                 status_lbl.setText("--")
-                status_lbl.setStyleSheet("color: #8a8a8a; font-weight: 600;")
             return
 
         self.zone_name_lbl.setText(target.get("zone", "GENERAL"))
@@ -426,14 +423,11 @@ class MonitorView(QWidget):
             if ppe_key in present:
                 icon_lbl.setPixmap(pixmap_check(size=14))
                 status_lbl.setText("Detectado")
-                status_lbl.setStyleSheet("color: #107c10; font-weight: 600;")
             elif ppe_key in missing:
                 icon_lbl.setPixmap(pixmap_x(size=14))
                 status_lbl.setText("Faltante")
-                status_lbl.setStyleSheet("color: #d13438; font-weight: 600;")
             else:
                 icon_lbl.setPixmap(pixmap_dot(size=14))
                 status_lbl.setText("N/A")
-                status_lbl.setStyleSheet("color: #8a8a8a; font-weight: 600;")
 
         self.rule_detail_lbl.setText(target.get("rule", "Sin regla activa."))
