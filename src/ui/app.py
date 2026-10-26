@@ -150,6 +150,9 @@ class MainWindow(FluentWindow):
     def _on_rules_updated(self):
         if hasattr(self, "video_worker"):
             self.video_worker.reload_rules()
+            # Al renombrar/eliminar un perfil se puede actualizar
+            # zones.json (perfil de las zonas): refrescar el worker también.
+            self.video_worker.reload_zones()
         self.view_zones._load_profiles()
 
     def closeEvent(self, event):

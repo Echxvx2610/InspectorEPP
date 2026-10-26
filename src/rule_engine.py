@@ -6,6 +6,8 @@ Aplica reglas explícitas de EPP por zona delimitada con explicabilidad completa
 import json
 import os
 
+from src import paths
+
 
 # Nombres legibles en español
 PPE_ES_NAMES = {
@@ -20,8 +22,8 @@ PPE_ES_NAMES = {
 
 
 class RuleEngine:
-    def __init__(self, config_path="config/rules.json", zone="GENERAL"):
-        self.config_path = config_path
+    def __init__(self, config_path=paths.RULES_PATH, zone="GENERAL"):
+        self.config_path = str(config_path)
         self.zone = zone
         self.rules = {}
         self.reload()
@@ -103,7 +105,7 @@ class RuleEngine:
             return {
                 "is_safe": False,
                 "missing": missing,
-                "rule_code": "VIOLACION",
+                "rule_code": "NO CUMPLE",
                 "explanation": f"Falta {', '.join(missing_es)} en {display_name}."
             }
 

@@ -7,5 +7,14 @@
     ],
     "mensaje": "Se requiere EPP para ALMACEN.",
     "mensaje_error": "Se requiere EPP para ALMACEN."
+  },
+  "SMT": {
+    "requeridos": [
+      "glasses",
+      "gloves",
+      "boots"
+    ],
+    "mensaje": "Se requiere EPP para SMT.",
+    "mensaje_error": "Se requiere EPP para SMT."
   }
 }

@@ -29,8 +29,9 @@ from src.association import PPEAssociator
 from src.rule_engine import RuleEngine
 from src.temporal import TemporalFilter
 from src.alert_system import AlertSystem
+from src import paths
 
-SETTINGS_PATH = "config/settings.json"
+SETTINGS_PATH = str(paths.SETTINGS_PATH)  # absoluta: ver src/paths.py
 
 
 class VideoWorker(QThread):

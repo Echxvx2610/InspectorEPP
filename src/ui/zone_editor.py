@@ -20,6 +20,8 @@ from qfluentwidgets import (
     MessageBox, ScrollArea, isDarkTheme
 )
 
+from src import paths
+
 PROFILE_COLORS = {
     "SOLDADURA":   (209, 52, 56),
     "LABORATORIO": (16, 124, 16),
@@ -171,8 +173,8 @@ class ZoneEditorView(ScrollArea):
         self.setObjectName("zonesView")
         self.setWidgetResizable(True)
 
-        self.config_path = "config/zones.json"
-        self.rules_path = "config/rules.json"
+        self.config_path = str(paths.ZONES_PATH)
+        self.rules_path = str(paths.RULES_PATH)
         self.current_cam = "camara_0"
         self._frozen = False          # imagen congelada para trazar cómodo
         self._last_bg_ts = 0.0        # throttle del refresco de fondo

@@ -7,9 +7,11 @@ y extracción de detecciones de implementos de seguridad (EPP).
 import os
 from ultralytics import YOLO
 
+from src import paths
+
 
 class PPEDetector:
-    def __init__(self, model_path="models/ppe_best.pt"):
+    def __init__(self, model_path=paths.MODELS_DIR / "ppe_best.pt"):
         self.model_path = model_path
         self.model = None
         self._next_fallback_id = 1
@@ -17,15 +19,15 @@ class PPEDetector:
         # Buscar modelos disponibles en orden de prioridad
         candidate_paths = [
             model_path,
-            "models/ppe_yolov8.pt",
-            "models/ppe_best.pt",
-            "yolov8n.pt"
+            paths.MODELS_DIR / "ppe_yolov8.pt",
+            paths.MODELS_DIR / "ppe_best.pt",
+            paths.PROJECT_ROOT / "yolov8n.pt"
         ]
 
         loaded_path = None
         for path in candidate_paths:
             if path and os.path.exists(path):
-                loaded_path = path
+                loaded_path = str(path)
                 break
 
         if loaded_path:

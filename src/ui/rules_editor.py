@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QCheckBox, QListWidgetItem
 )
 
+from src import paths
 from qfluentwidgets import (
     CardWidget, ListWidget, PrimaryPushButton, PushButton,
     BodyLabel, CaptionLabel, SubtitleLabel, LineEdit, FluentIcon as FIF,
@@ -55,8 +56,11 @@ class RulesEditorView(ScrollArea):
         self.setObjectName("rulesView")
         self.setWidgetResizable(True)
 
-        self.rules_path = "config/rules.json"
-        self.classes_path = "config/classes.json"
+        self.rules_path = str(paths.RULES_PATH)
+        self.classes_path = str(paths.CLASSES_PATH)
+        # Para el renombrado: las zonas referencian perfil por NOMBRE;
+        # renombrar un perfil debe actualizarlas a la vez (ver _apply_rename)
+        self.zones_path = str(paths.ZONES_PATH)
         self.rules_data = {}
         self.classes_data = {}
         self.selected_profile = None
@@ -97,14 +101,18 @@ class RulesEditorView(ScrollArea):
         self.profile_list.itemClicked.connect(self._on_profile_clicked)
         l.addWidget(self.profile_list, stretch=1)
 
-        btns = QHBoxLayout()
+        btns = QGridLayout()
+        btns.setSpacing(8)
         btn_add = PrimaryPushButton(FIF.ADD, "Nuevo")
         btn_add.clicked.connect(self._add_profile)
+        btn_rename = PushButton(FIF.EDIT, "Renombrar")
+        btn_rename.clicked.connect(self._rename_profile)
         self.btn_del = PushButton(FIF.DELETE, "Eliminar")
         self.btn_del.setEnabled(False)
         self.btn_del.clicked.connect(self._del_profile)
-        btns.addWidget(btn_add)
-        btns.addWidget(self.btn_del)
+        btns.addWidget(btn_add, 0, 0)
+        btns.addWidget(btn_rename, 0, 1)
+        btns.addWidget(self.btn_del, 1, 0, 1, 2)
         l.addLayout(btns)
 
         self.main.addWidget(left, stretch=1)
@@ -223,6 +231,98 @@ class RulesEditorView(ScrollArea):
             self._save_to_file()
             self._load_rules()
 
+    def _rename_profile(self):
+        """Pide el nombre nuevo en un diálogo Fluent y aplica el cambio."""
+        if not self.selected_profile:
+            return
+        viejo = self.selected_profile
+        dlg = NameDialog(self.window())
+        dlg.titleLabel.setText("Renombrar perfil")
+        dlg.yesButton.setText("Renombrar")
+        dlg.edit.setText(viejo)
+        dlg.edit.selectAll()  # cómodo: escribir encima del nombre actual
+        if dlg.exec():
+            self._apply_rename(viejo, dlg.name())
+
+    def _apply_rename(self, viejo, nuevo):
+        """
+        Renombra el perfil de verdad: reglas.json + zonas.json + selección.
+
+        - Conserva el ORDEN de perfiles del JSON (solo cambia la clave).
+        - Actualiza zones.json: toda zona que usaba el perfil viejo pasa
+          a referenciar el nuevo. Si no, quedaría apuntando a un perfil
+          que ya no existe (R0: sin regla = nunca alarmaría).
+        """
+        nuevo = (nuevo or "").strip().upper()
+        if not nuevo or nuevo == viejo:
+            return
+        if nuevo in self.rules_data:
+            InfoBar.warning(
+                "Atención", f"'{nuevo}' ya existe.",
+                parent=self, position=InfoBarPosition.TOP, duration=2500
+            )
+            return
+
+        self.rules_data = {
+            (nuevo if k == viejo else k): v
+            for k, v in self.rules_data.items()
+        }
+        self.selected_profile = nuevo
+
+        if not self._save_to_file():
+            return
+        n_zonas = self._renombrar_en_zonas(viejo, nuevo)
+        self._load_rules()
+        self._seleccionar(nuevo)
+        self.rules_updated.emit()
+
+        if n_zonas:
+            InfoBar.success(
+                "Reglas",
+                f"Perfil renombrado a '{nuevo}' ({n_zonas} zona(s) actualizadas)",
+                parent=self, position=InfoBarPosition.TOP, duration=2500
+            )
+        else:
+            InfoBar.success(
+                "Reglas", f"Perfil renombrado a '{nuevo}'",
+                parent=self, position=InfoBarPosition.TOP, duration=2500
+            )
+
+    def _renombrar_en_zonas(self, viejo, nuevo):
+        """Cambia z['perfil'] en zones.json; devuelve cuántas zonas tocó."""
+        if not os.path.exists(self.zones_path):
+            return 0
+        try:
+            with open(self.zones_path, "r", encoding="utf-8") as f:
+                datos = json.load(f)
+        except Exception:
+            return 0
+        n = 0
+        for zonas_camara in datos.values():
+            if not isinstance(zonas_camara, list):
+                continue
+            for z in zonas_camara:
+                if (isinstance(z, dict)
+                        and (z.get("perfil") or "").upper() == viejo.upper()):
+                    z["perfil"] = nuevo
+                    n += 1
+        if n:
+            try:
+                with open(self.zones_path, "w", encoding="utf-8") as f:
+                    json.dump(datos, f, indent=2, ensure_ascii=False)
+            except Exception:
+                return 0
+        return n
+
+    def _seleccionar(self, nombre):
+        """Deja seleccionado en la lista un perfil por nombre (tras reload)."""
+        for i in range(self.profile_list.count()):
+            item = self.profile_list.item(i)
+            if item.data(Qt.UserRole) == nombre:
+                self.profile_list.setCurrentRow(i)
+                self._on_profile_clicked(item)
+                return
+
     def _save_changes(self):
         if not self.selected_profile:
             return
@@ -243,7 +343,7 @@ class RulesEditorView(ScrollArea):
 
     def _save_to_file(self):
         try:
-            os.makedirs("config", exist_ok=True)
+            os.makedirs(paths.CONFIG_DIR, exist_ok=True)
             with open(self.rules_path, "w", encoding="utf-8") as f:
                 json.dump(self.rules_data, f, indent=2, ensure_ascii=False)
             return True

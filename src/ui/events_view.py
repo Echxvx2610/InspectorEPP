@@ -19,6 +19,8 @@ from qfluentwidgets import (
     InfoBarPosition, isDarkTheme
 )
 
+from src import paths
+
 DEMO_DATA = False
 
 STATE_COLOR = {
@@ -113,9 +115,9 @@ class EventsView(QWidget):
         self.zone_filter.blockSignals(True)
         self.zone_filter.clear()
         self.zone_filter.addItem("Todas", userData="ALL")
-        if os.path.exists("config/zones.json"):
+        if os.path.exists(paths.ZONES_PATH):
             try:
-                with open("config/zones.json", "r", encoding="utf-8") as f:
+                with open(paths.ZONES_PATH, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 names = set()
                 for cam_zones in data.values():

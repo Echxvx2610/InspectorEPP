@@ -9,6 +9,8 @@ import json
 import cv2
 import numpy as np
 
+from src import paths
+
 
 # Colores por perfil (BGR)
 PROFILE_COLORS = {
@@ -21,8 +23,8 @@ DEFAULT_COLOR = ((240, 160, 40), (60, 40, 10))
 
 
 class ZoneManager:
-    def __init__(self, config_path="config/zones.json"):
-        self.config_path = config_path
+    def __init__(self, config_path=paths.ZONES_PATH):
+        self.config_path = str(config_path)
         self.zones_by_camera = {}
         self.reload()
 

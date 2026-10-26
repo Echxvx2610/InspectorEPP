@@ -14,7 +14,9 @@ from qfluentwidgets import (
     InfoBar, InfoBarPosition, SubtitleLabel
 )
 
-SETTINGS_PATH = "config/settings.json"
+from src import paths
+
+SETTINGS_PATH = str(paths.SETTINGS_PATH)  # absoluta: ver src/paths.py
 
 
 class _InputMixin:
@@ -230,7 +232,7 @@ class SettingsView(ScrollArea):
         }
         self.current_settings = new
         try:
-            os.makedirs("config", exist_ok=True)
+            os.makedirs(paths.CONFIG_DIR, exist_ok=True)
             with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
                 json.dump(new, f, indent=2)
             InfoBar.success("Ajustes", "Guardados correctamente",
