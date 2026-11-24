@@ -1,104 +1,126 @@
 # AGENTS.md — InspectorEPP (Guardián EPP)
 
 Sistema de visión en tiempo real que verifica cumplimiento de EPP: YOLO +
-ByteTrack (conexionista) → asociación persona↔EPP y ubicación en zona
-(geométrico) → motor de reglas simbólico → filtro temporal (anti-parpadeo) →
-alertas (voz, relé/Arduino). Python 3.11, PySide6, OpenCV, supervision.
+ByteTrack → asociación persona↔EPP y ubicación en zona → motor de reglas
+simbólico → filtro temporal (anti-parpadeo) → alertas. Python 3.11,
+PySide6 + qfluentwidgets, OpenCV, Ultralytics.
 
 Todo el contenido de usuario (UI, mensajes, comentarios) va en **español**.
 
-## Requisitos
+## Entorno y comandos
 
-- Usar el venv local (Python 3.11): en PowerShell
-  `.\venv\Scripts\Activate.ps1`; en cmd `venv\Scripts\activate.bat`.
+- No hay `venv/` en el repo. En esta máquina `python3` ya resuelve a Python
+  3.11.15 (pyenv `env_epp`) con las deps de `requirements.txt`. Alternativa
+  limpia: `python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt`
+  (en Windows: `python -m venv venv` y `venv\Scripts\activate`).
+- `python3 main.py` → GUI. Entrypoint real: `src/ui/app.py:MainWindow`.
+  `main.py` fija `cwd` y `sys.path` a la raíz antes de importar `src.*`.
+- `python3 main.py --cli --source 0 --zone GENERAL` → loop OpenCV CLI
+  (legacy: polígono fijo y busca `models/ppe_yolov8.pt` con fallback a
+  `ppe_best.pt`).
+- Smoke test sin pantalla ni cámara:
+  `QT_QPA_PLATFORM=offscreen python3 test_run.py` → imprime
+  `MainWindow initialized successfully!` y cierra el worker.
+- Demos: `python3 demo/pasoN_*.py` (paso1–paso9; guía en `demo/GUIA.md`).
+  Salen con la tecla `s`; sin cámara usan `demo/foto_base.jpg`.
+- **No hay pytest, tests, lint, typecheck, build ni CI.** No inventar comandos.
 
-## Ejecución (siempre desde la raíz del proyecto)
+## Arquitectura (no obvia por los nombres)
 
-- `python main.py` → app GUI PySide6 (entrypoint real: `src/ui/app.py` `MainWindow`).
-- `python main.py --cli --source 0 --zone GENERAL` → loop OpenCV CLI.
-- Verificación más rápida de que la app arranca: `python test_run.py`.
-- Demos de aprendizaje: `python demo/paso1_camara.py` …
-  (paso1–paso9, con `demo/GUIA.md` como guía y bitácora; los pasos
-  5–9 son versiones educativas de los módulos reales; salen con la
-  tecla `s`, y sin cámara usan `demo/foto_base.jpg`).
-- **No hay pytest ni suite de tests** (ni `tests/` ni `training/`);
-  no inventar comandos de test/lint/build.
+- `src/detector.py` usa **dos modelos**: `models/person_coco.pt` (COCO, solo
+  clase 0 `person`, con ByteTrack para IDs estables) y `models/ppe_best.pt`
+  (EPP). No es un único detector; no "simplificarlo" a uno.
+- Pipeline en `src/ui/video_worker.py` (QThread): captura → dibujar zonas →
+  detección/tracking → asociación (`src/association.py`, regiones por altura)
+  → punto de pies en polígono (`src/zones.py`) → reglas
+  (`src/rule_engine.py`) → filtro temporal (`src/temporal.py`) → alertas.
+  Preservar ese orden.
+- `src/alert_system.py` implementa **solo voz (pyttsx3)** con cooldown. El
+  relé es simulado: `relay_blocked`/`relay` en metadata y UI; no hay código
+  serial/pyserial activo.
+- `src/ui/app.py` cablea las señales entre vistas y alimenta
+  `EventsView.add_event` desde `meta["events"]`. `meta["raw"]` es el frame
+  BGR limpio que usa el editor de zonas.
 
-## Gotchas críticos
+## Rutas y configuración
 
-- **Rutas de config SIEMPRE de `src/paths.py`**: ninguna parte calcula
-  rutas relativas (`"config/rules.json"`, `"models/ppe_best.pt"`).
-  Importar de `src/paths.py` (PROJECT_ROOT / CONFIG_DIR / MODELS_DIR +
-  RULES_PATH, ZONES_PATH, CLASSES_PATH, SETTINGS_PATH), ancladas a
-  `__file__`, no al CWD. Ya lo usan: `detector`, `rule_engine`,
-  `zones`, `video_worker`, `main.py` (CLI), `rules_editor`,
-  `zone_editor`, `settings_view`, `events_view`. `main.py` además fija
-  cwd = raíz como red de seguridad. Síntoma de ruta relativa suelta:
-  fallback silencioso (JSON "no existe") → UI vacía y cambios no
-  reflejados según desde dónde se abra la app.
-- (histórico, antes de paths.py) Estas rutas eran relativas al CWD y
-  solo funcionaban ejecutando con cwd = raíz del proyecto.
-- **No existe la carpeta `models/`**: `PPEDetector` (`src/detector.py`) cae por
-  defecto a `yolov8n.pt` de la raíz (COCO, sin clases EPP → las reglas nunca
-  pasan). Un modelo PPE entrenado va en `models/ppe_best.pt` o
-  `models/ppe_yolov8.pt` (orden de búsqueda en el constructor).
-- **Contrato de clases**: usar siempre los mismos ids en inglés/minúsculas
-  (`helmet`, `vest`, `gloves`, `welding_mask`, `mask`, `glasses`, `boots`) en
-  dataset, `config/classes.json` y `config/rules.json`, y en el código.
-  Nunca modelar clases tipo "sin casco": la ausencia se deduce simbólicamente
-  (persona detectada ∧ sin EPP asociado → violación).
-- **Pipeline completo en `src/ui/video_worker.py`** (QThread): orden
-  cámara → zonas → detección+tracking → asociación → zona → reglas →
-  temporal → alertas. Preservar ese orden y el contrato de la señal
-  `frame_ready(object, dict)`; parar con `stop()` (quit + wait(10000);
-  el `wait` debe superar el bloqueo de apertura CAP_DSHOW ~2-6 s,
-  si es más corto el proceso muere con -1073740791 al salir).
-  `meta` incluye `"raw"`: frame BGR sin anotaciones (base para el
-  editor de zonas).
-- `AlertSystem` reproduce voz (pyttsx3) y activa el relé serial
-  (pyserial/Arduino). Al correr sin hardware, verificar que estén
-  deshabilitados en la vista Ajustes.
-- **Repo git**: el `.git` real está en la carpeta `Documents` (branch
-  `master`, sin commits); `InspectorEPP` es una subcarpeta. Al hacer commit
-  incluir solo esta subcarpeta (`git add .` desde aquí) y cuidar `*.pt`
-  (no ignorados, 6–20 MB cada uno).
-- **`plan_correcion.md` es un checklist vivo** de refactor UI/UX: leerlo
-  antes de tocar `src/ui/` (problemas conocidos: eventos no conectados a
-  `EventsView.add_event`, estilos heredados en QLabel, etc.).
+- **Importar siempre de `src/paths.py`** (`RULES_PATH`, `ZONES_PATH`,
+  `CLASSES_PATH`, `SETTINGS_PATH`, `MODELS_DIR`...), ancladas a `__file__`,
+  no al CWD. Nunca escribir `"config/rules.json"` o `"models/..."` a mano.
+- `config/` de la raíz es la única fuente: `rules.json` (perfil → requeridos
+  + mensaje), `zones.json` (`camara_N` → polígonos con `perfil`),
+  `classes.json` (clase → nombre en español).
+- `config/settings.json` **no está en git**: lo crea la vista Ajustes al
+  guardar y lo lee `VideoWorker` al arrancar.
+- **`src/ui/config/` es un duplicado obsoleto** (rules/settings/zones
+  trackeados en git, sin importadores). No editarlo; editar `config/`.
+- Renombrar un perfil en `rules_editor.py` actualiza también `zones.json`.
+  Si se edita a mano, el `perfil` de cada zona debe coincidir con una clave
+  de `rules.json`; si no, R0 asume "sin regla" y nunca alerta.
 
-## Configuración
+## Contrato de clases (verificado en los pesos)
 
-- `config/zones.json` — polígonos por cámara (perfil por zona).
-- `config/rules.json` — perfil → EPP requerido + mensaje.
-- `config/classes.json` — mapeo clase del modelo → nombre en español.
-- `config/settings.json` — lo escribe la vista Ajustes y el worker lo
-  aplica en caliente (`apply_settings`).
+- Clases reales de `models/ppe_best.pt`: `boots`, `esd_smock`, `glasses`,
+  `gloves`, `helmet`, `person`, `vest`, `welding_mask` (ids en
+  inglés/minúsculas). `detector.normalizar` mapea `glass` → `glasses`.
+- Hay desajustes conocidos: `config/classes.json` no incluye `esd_smock`
+  (el monitor sí lo muestra; el editor de reglas no lo ofrece) y
+  `config/rules.json` exige `mask` en LABORATORIO, pero el modelo no emite
+  `mask`. Revisar esto antes de "arreglar" una alarma.
+- No modelar clases tipo "sin casco": la ausencia se deduce simbólicamente
+  (persona ∧ EPP no asociado → falta).
 
-## UI (PySide6)
+## UI (qfluentwidgets free 1.11.3)
 
-- Se usa **qfluentwidgets versión free (1.11.3)**. NO usar APIs de la versión
-  Pro (ni de PyQt5-Fluent/otras variantes) ni llamar `pip install -U
-  qfluentwidgets` a ciegas; verificar que el atributo exista antes de usarlo.
-  Cosas que NO existen en free (halladas en producción):
-  - Íconos: `FIF.MAP`, `FIF.TIMER`, `FIF.CONNECTION`, `FIF.X` — usar
-    `FIF.PIN`, `FIF.STOP_WATCH`, `FIF.BUS` o equivalentes.
+- Usar solo APIs free; no `pip install -U qfluentwidgets` a ciegas ni APIs
+  Pro. Verificar atributos antes de usarlos. En free **no existen**:
+  - Íconos `FIF.MAP`, `FIF.TIMER`, `FIF.CONNECTION`, `FIF.X` (usar
+    `FIF.PIN`, `FIF.STOP_WATCH`, `FIF.BUS`...).
   - `SimpleListWidget`, `ListWidgetItem`, `EditLabel`, `HeaderViewMode`.
-  - `TableWidget.headerView` (usar `horizontalHeader()` nativo),
+  - `TableWidget.headerView` (usar `horizontalHeader()`),
     `TableWidget.setCornerButtonVisible` (usar `setCornerButtonEnabled`).
-  - Enums por instancia (`self.table.NoEditTriggers`) — usar
-    `QAbstractItemView.NoEditTriggers`.
-  - `SettingCardGroup.addSettingRange/addSetting` — usar
-    `addSettingCards` / `addSettingCard`.
-  - `FluentWindow.navigation` — en free es `navigationInterface`.
-- Formas de armar vistas: cada vista es `ScrollArea` con `objectName`
-  único (requisito de `FluentWindow.addSubInterface`).
-- Estilos/QSS previos en `src/ui/styles.py`; los roles `set_role`,
-  `StatusChip`, `Toast` fueron reemplazados por labels Fluent,
-  `InfoBadge` e `InfoBar` (ver mapa de equivalencias en
-  `src/ui/ui_helpers.py`).
-- Iconos: SVG tintados de un solo color (`nav_icon`, `tint_icon`,
-  `assets/icons/`). Sin emojis en la UI (usar iconos SVG).
-- `README.md` está desactualizado (menciona `customtkinter`,
-  `storage.py`, `training/` y `tests/` que no existen). La fuente
-  confiable de dependencias es `requirements.txt`.
-  Nota: Ultralytics YOLOv8 es AGPL-3.0 (relevante si se comercializa).
+  - `SettingCardGroup.addSettingRange`/`addSetting` (usar `addSettingCards`
+    / `addSettingCard`).
+  - `FluentWindow.navigation`: en free el atributo de instancia es
+    `navigationInterface`.
+- Enums de Qt desde la clase, no desde la instancia:
+  `QAbstractItemView.NoEditTriggers`.
+- `ComboBox` free: `addItem(text, icon=None, userData=None)` y
+  `setItemData(index, value)` **sin rol**. Pasar `userData=` por keyword.
+- Cada vista necesita `objectName` único para `addSubInterface`. La mayoría
+  son `ScrollArea`, pero `EventsView` es `QWidget`; respetar el patrón actual.
+- No llamar `initNavigation()` (no existe en `FluentWindow`); `addSubInterface`
+  registra las vistas.
+- Iconos: SVG tintados (`src/ui/icons.py`, `assets/icons/`); sin emojis.
+  `src/ui/styles.py` y `src/ui/ui_helpers.py` son legado sin importadores
+  (el mapa de equivalencias está en el docstring de `ui_helpers.py`); no
+  reutilizar QSS.
+- Los errores no capturados se escriben en `guardian_error.log` y muestran
+  un diálogo (`sys.excepthook` en `src/ui/app.py`).
+
+## Modelos y git
+
+- Los pesos están en `models/` (`ppe_best.pt` ~20 MB, `person_coco.pt`
+  ~6.5 MB) y **sí están trackeados** pese al comentario de `.gitignore`.
+  `src/ui/yolov8n.pt` es una copia suelta sin uso.
+- El repo git está en la raíz de `InspectorEPP` (branch `main`, ya tiene
+  commits). No asumir el `.git` de `Documents`.
+- Fallbacks del detector: PPE `ppe_best.pt` → `ppe_yolov8.pt`; personas
+  `person_coco.pt` → `yolov8n.pt` en la raíz (no existe). Si falta el modelo
+  de personas, usa la clase `person` del modelo EPP (débil).
+
+## Cierre del worker
+
+- Parar con `stop()` (`quit()` + `wait(10000)`). En Windows la apertura con
+  `CAP_DSHOW` bloquea 2–6 s y un `wait` corto aborta el proceso con
+  `-1073740791`; en Linux se usa `CAP_V4L2`.
+- `frame_ready` es `Signal(object, object)`: `(frame_anotado | None,
+  metadata: dict)`. Emitir por `_emit_frame` (protegido contra vistas ya
+  destruidas).
+
+## Notas
+
+- `README.md` está desactualizado (menciona `customtkinter`, `storage.py`,
+  `training/`, `tests/`). La fuente ejecutable es `requirements.txt` + este
+  archivo.
+- Ultralytics YOLOv8 es AGPL-3.0 (relevante si se comercializa).

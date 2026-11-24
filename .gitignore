@@ -17,3 +17,4 @@ __pycache__/
 
 # Logs y bases de datos locales
 *.log
+.enjambre/
