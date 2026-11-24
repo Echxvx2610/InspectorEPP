@@ -17,6 +17,7 @@ Pipeline:
 """
 
 import os
+import sys
 import json
 import time
 import cv2
@@ -36,7 +37,7 @@ SETTINGS_PATH = str(paths.SETTINGS_PATH)  # absoluta: ver src/paths.py
 
 class VideoWorker(QThread):
     # Emite: (frame_anotado o None, metadata_dict)
-    frame_ready = Signal(object, dict)
+    frame_ready = Signal(object, object)
     fps_updated = Signal(float)
     status_message = Signal(str)
 
@@ -57,6 +58,9 @@ class VideoWorker(QThread):
         self.temporal = TemporalFilter(grace_period_sec=1.5, min_consecutive_frames=4)
         self.alert_system = AlertSystem()
 
+        # umbral propio para EPP
+        self.conf_ppe = 0.25
+
         self._load_settings()
 
     def _load_settings(self):
@@ -71,6 +75,7 @@ class VideoWorker(QThread):
         """Aplica los ajustes de la vista de Ajustes en caliente."""
         with QMutexLocker(self._mutex):
             self.conf_threshold = float(s.get("confidence_threshold", 0.30))
+            self.conf_ppe = float(s.get("ppe_confidence_threshold", 0.25))
             self.temporal.min_consecutive_frames = int(
                 s.get("grace_period_frames", 4)
             )
@@ -120,11 +125,21 @@ class VideoWorker(QThread):
         """Intenta abrir la fuente de video con backend adecuado."""
         if isinstance(src, int) or (isinstance(src, str) and str(src).isdigit()):
             idx = int(src)
-            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+            # DSHOW solo existe en Windows; en Linux se usa V4L2
+            if sys.platform.startswith("win"):
+                backend = cv2.CAP_DSHOW
+            elif sys.platform.startswith("linux"):
+                backend = cv2.CAP_V4L2
+            else:
+                backend = cv2.CAP_ANY
+            cap = cv2.VideoCapture(idx, backend)
             if not cap.isOpened():
                 cap = cv2.VideoCapture(idx)
             return cap
-        return cv2.VideoCapture(str(src))
+        # Archivo, HTTP o RTSP
+        cap = cv2.VideoCapture(str(src))
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # menos retraso en streams de red
+        return cap
 
     def run(self):
         self._running = True
@@ -139,6 +154,9 @@ class VideoWorker(QThread):
 
             with QMutexLocker(self._mutex):
                 src = self.source
+                is_stream = isinstance(src, str) and src.lower().startswith(
+                                ("http://", "https://", "rtsp://")
+                            )
 
             # Inicializar captura si no está abierta
             if self.cap is None or not self.cap.isOpened():
@@ -173,8 +191,8 @@ class VideoWorker(QThread):
 
             ret, frame = self.cap.read()
             if not ret or frame is None:
-                # Si es archivo de video, reiniciar en loop infinito
-                if isinstance(src, str) and not src.isdigit():
+                # Archivo de video local: reiniciar en loop infinito
+                if isinstance(src, str) and not src.isdigit() and not is_stream:
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     ret, frame = self.cap.read()
 
@@ -193,6 +211,10 @@ class VideoWorker(QThread):
                     }
                     self.fps_updated.emit(0.0)
                     self._emit_frame(None, metadata)
+                    if is_stream:
+                        # Forzar reconexión en el siguiente ciclo
+                        self.cap.release()
+                        self.cap = None
                     self.msleep(500)
                     continue
 
@@ -202,6 +224,7 @@ class VideoWorker(QThread):
 
             with QMutexLocker(self._mutex):
                 conf = self.conf_threshold
+                conf_ppe = self.conf_ppe
 
             # A. Dibujar zonas de seguridad delimitadas sobre el frame
             annotated_frame = self.zone_manager.draw_zones(
@@ -209,7 +232,9 @@ class VideoWorker(QThread):
             )
 
             # B. Inferencia conexionista + tracking de personas y EPP
-            persons, ppe_items, _ = self.detector.detect_and_track(frame, conf=conf)
+            persons, ppe_items, _ = self.detector.detect_and_track(
+                frame, conf=conf, conf_ppe=conf_ppe
+            )
 
             # C. Asociación geométrica Persona <-> EPP
             associations = self.associator.associate(persons, ppe_items)

@@ -8,3 +8,62 @@ Traceback (most recent call last):
 AttributeError: 'RulesEditorView' object has no attribute 'profile_combo'
 
 ------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/Echxvx/development/programmer/Python/inteligenciaArtificial/InspectorEPP/main.py", line 119, in <module>
+    main()
+  File "/home/Echxvx/development/programmer/Python/inteligenciaArtificial/InspectorEPP/main.py", line 116, in main
+    run_gui()
+  File "/home/Echxvx/development/programmer/Python/inteligenciaArtificial/InspectorEPP/main.py", line 27, in run_gui
+    window = MainWindow()
+             ^^^^^^^^^^^^
+  File "/home/Echxvx/development/programmer/Python/inteligenciaArtificial/InspectorEPP/src/ui/app.py", line 105, in __init__
+    self.video_worker = VideoWorker(source=0, parent=self)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/Echxvx/development/programmer/Python/inteligenciaArtificial/InspectorEPP/src/ui/video_worker.py", line 64, in __init__
+    self.conf_ppe = float(s.get("ppe_confidence_threshold", 0.25))
+                          ^
+NameError: name 's' is not defined
+
+------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 421, in mouseReleaseEvent
+    self._toggleComboMenu()
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 357, in _toggleComboMenu
+    self._showComboMenu()
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 318, in _showComboMenu
+    action = QAction(item.icon, item.text)
+                     ^^^^^^^^^
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 48, in icon
+    return self._icon.icon()
+           ^^^^^^^^^^^^^^^
+AttributeError: 'int' object has no attribute 'icon'
+
+------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 421, in mouseReleaseEvent
+    self._toggleComboMenu()
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 357, in _toggleComboMenu
+    self._showComboMenu()
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 318, in _showComboMenu
+    action = QAction(item.icon, item.text)
+                     ^^^^^^^^^
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 48, in icon
+    return self._icon.icon()
+           ^^^^^^^^^^^^^^^
+AttributeError: 'int' object has no attribute 'icon'
+
+------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 421, in mouseReleaseEvent
+    self._toggleComboMenu()
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 357, in _toggleComboMenu
+    self._showComboMenu()
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 318, in _showComboMenu
+    action = QAction(item.icon, item.text)
+                     ^^^^^^^^^
+  File "/home/Echxvx/.pyenv/versions/3.11.15/envs/env_epp/lib/python3.11/site-packages/qfluentwidgets/components/widgets/combo_box.py", line 48, in icon
+    return self._icon.icon()
+           ^^^^^^^^^^^^^^^
+AttributeError: 'int' object has no attribute 'icon'
+
+------------------------------------------------------------

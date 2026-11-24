@@ -30,9 +30,8 @@
   },
   "SMT": {
     "requeridos": [
-      "glasses",
-      "gloves",
-      "boots"
+      "vest",
+      "mask"
     ],
     "mensaje": "Se requiere EPP para SMT.",
     "mensaje_error": "Se requiere EPP para SMT."

@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, Slot, Signal, QRect
 from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QSizePolicy, QGridLayout, QFileDialog, QStackedWidget
+    QSizePolicy, QGridLayout, QFileDialog, QStackedWidget,QInputDialog
 )
 
 from qfluentwidgets import (
@@ -119,9 +119,12 @@ class StatusBadge(QWidget):
             )
         )
         lay.addWidget(self.badge)
+        self._last = (text, state)
 
     def set_status(self, text, state):
-        fg, bg = self._STYLE.get(state, self._STYLE["idle"])
+        if (text, state) == self._last:
+            return  # sin cambios: no recrear el widget
+        self._last = (text, state)
         lay = self.layout()
         lay.removeWidget(self.badge)
         self.badge.deleteLater()
@@ -150,6 +153,7 @@ class MonitorView(ScrollArea):
         self.vBoxLayout.setContentsMargins(24, 16, 24, 16)
         self.vBoxLayout.setSpacing(12)
         self.setWidget(container)
+        self._px_cache = {}
         self._init_ui()
 
     def _init_ui(self):
@@ -159,9 +163,12 @@ class MonitorView(ScrollArea):
 
         toolbar.addWidget(BodyLabel("Fuente"))
         self.cam_combo = ComboBox()
-        self.cam_combo.addItems(["Cámara 0", "Cámara 1", "Cámara 2", "Archivo de video..."])
+        self.cam_combo.addItems(["Cámara 0", "Cámara 1", "Cámara 2",
+                                 "Archivo de video", "Cámara IP (URL)"])
         self.cam_combo.setItemData(0, 0); self.cam_combo.setItemData(1, 1)
         self.cam_combo.setItemData(2, 2); self.cam_combo.setItemData(3, "FILE")
+        self.cam_combo.setItemData(4, "URL")
+        self._last_url = "http://192.168.0.5:8080/video"
         self.cam_combo.setCurrentIndex(0)
         self.cam_combo.setMinimumWidth(170)
         self.cam_combo.currentIndexChanged.connect(self._on_camera_select)
@@ -224,12 +231,19 @@ class MonitorView(ScrollArea):
         self.person_combo.currentIndexChanged.connect(self._on_person_selected)
         p.addWidget(self.person_combo)
 
-        # Checklist EPP
+        # Checklist EPP ( es necesario reentrenar con refuerzo en zonas de soldadura)
+        # self.ppe_items = {
+        #     "welding_mask": self._make_ppe_row("Careta"),
+        #     "vest": self._make_ppe_row("Chaleco"),
+        #     "gloves": self._make_ppe_row("Guantes"),
+        #     "helmet": self._make_ppe_row("Casco"),
+        # }
         self.ppe_items = {
-            "welding_mask": self._make_ppe_row("Careta"),
-            "vest": self._make_ppe_row("Chaleco"),
-            "gloves": self._make_ppe_row("Guantes"),
             "helmet": self._make_ppe_row("Casco"),
+            "vest": self._make_ppe_row("Chaleco"),
+            "glasses": self._make_ppe_row("Lentes"),
+            "boots": self._make_ppe_row("Botas"),
+            "esd_smock": self._make_ppe_row("Bata ESD"),
         }
         for row_widget, _, _ in self.ppe_items.values():
             p.addWidget(row_widget)
@@ -277,7 +291,7 @@ class MonitorView(ScrollArea):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(6)
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(pixmap_dot(size=14))
+        self._set_icon(icon_lbl, "dot", 14)
         icon_lbl.setFixedSize(16, 16)
         icon_lbl.setAlignment(Qt.AlignCenter)
         text_lbl = BodyLabel(label_text)
@@ -287,6 +301,24 @@ class MonitorView(ScrollArea):
         h.addStretch()
         h.addWidget(status_lbl)
         return (w, icon_lbl, status_lbl)
+
+    # ── Iconos con caché (evita regenerar pixmaps en cada frame) ──
+
+    def _px(self, kind, size):
+        key = (kind, size)
+        px = self._px_cache.get(key)
+        if px is None:
+            fn = {"check": pixmap_check, "x": pixmap_x, "dot": pixmap_dot}[kind]
+            px = fn(size=size)
+            self._px_cache[key] = px
+        return px
+
+    def _set_icon(self, label, kind, size):
+        """Cambia el icono solo si realmente cambió el estado."""
+        if getattr(label, "_icon_kind", None) == kind:
+            return
+        label._icon_kind = kind
+        label.setPixmap(self._px(kind, size))
 
     # ── Slots ──
 
@@ -299,6 +331,18 @@ class MonitorView(ScrollArea):
             )
             if file_path:
                 self.camera_changed.emit(file_path, False)
+            else:
+                self.cam_combo.blockSignals(True)
+                self.cam_combo.setCurrentIndex(0)
+                self.cam_combo.blockSignals(False)
+        elif data == "URL":
+            url, ok = QInputDialog.getText(
+                self, "Cámara IP", "URL del stream:", text=self._last_url
+            )
+            url = url.strip()
+            if ok and url:
+                self._last_url = url
+                self.camera_changed.emit(url, False)
             else:
                 self.cam_combo.blockSignals(True)
                 self.cam_combo.setCurrentIndex(0)
@@ -327,7 +371,7 @@ class MonitorView(ScrollArea):
     def _clear_logs(self):
         self.log_list.clear()
 
-    @Slot(object, dict)
+    @Slot(object, object)
     def update_frame(self, frame, metadata):
         self._current_metadata = metadata
         camera_available = metadata.get("camera_available", True)
@@ -338,7 +382,7 @@ class MonitorView(ScrollArea):
             self.chip_fps.set_status("-- fps", "idle")
             self.chip_signal.set_status("Sin señal", "bad")
             self.chip_relay.set_status("Relé inactivo", "idle")
-            self.state_icon_lbl.setPixmap(pixmap_dot(size=20))
+            self._set_icon(self.state_icon_lbl, "dot", 20)
             self.state_text_lbl.setText("Sin señal")
             self.state_icon_lbl.setStyleSheet("color: #8a8a8a;")
             self.val_p_count.setText("0")
@@ -356,10 +400,10 @@ class MonitorView(ScrollArea):
         relay_blocked = metadata.get("relay_blocked", False)
 
         if global_safe:
-            self.state_icon_lbl.setPixmap(pixmap_check(size=20))
+            self._set_icon(self.state_icon_lbl, "check", 20)
             self.state_text_lbl.setText("Conforme")
         else:
-            self.state_icon_lbl.setPixmap(pixmap_x(size=20))
+            self._set_icon(self.state_icon_lbl, "x", 20)
             self.state_text_lbl.setText("Incumplimiento")
 
         if relay_blocked:
@@ -411,7 +455,7 @@ class MonitorView(ScrollArea):
             self.zone_name_lbl.setText(active_z)
             self.rule_detail_lbl.setText("Sin personas detectadas en cuadro.")
             for _, icon_lbl, status_lbl in self.ppe_items.values():
-                icon_lbl.setPixmap(pixmap_dot(size=14))
+                self._set_icon(icon_lbl, "dot", 14)
                 status_lbl.setText("--")
             return
 
@@ -421,13 +465,13 @@ class MonitorView(ScrollArea):
 
         for ppe_key, (_, icon_lbl, status_lbl) in self.ppe_items.items():
             if ppe_key in present:
-                icon_lbl.setPixmap(pixmap_check(size=14))
+                self._set_icon(icon_lbl, "check", 14)
                 status_lbl.setText("Detectado")
             elif ppe_key in missing:
-                icon_lbl.setPixmap(pixmap_x(size=14))
+                self._set_icon(icon_lbl, "x", 14)
                 status_lbl.setText("Faltante")
             else:
-                icon_lbl.setPixmap(pixmap_dot(size=14))
+                self._set_icon(icon_lbl, "dot", 14)
                 status_lbl.setText("N/A")
 
         self.rule_detail_lbl.setText(target.get("rule", "Sin regla activa."))

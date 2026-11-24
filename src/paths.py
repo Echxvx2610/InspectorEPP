@@ -29,3 +29,6 @@ RULES_PATH = CONFIG_DIR / "rules.json"
 ZONES_PATH = CONFIG_DIR / "zones.json"
 CLASSES_PATH = CONFIG_DIR / "classes.json"
 SETTINGS_PATH = CONFIG_DIR / "settings.json"
+
+PPE_MODEL_PATH = MODELS_DIR / "ppe_best.pt"
+PERSON_MODEL_PATH = MODELS_DIR / "person_coco.pt"
